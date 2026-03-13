@@ -1,0 +1,15 @@
+{
+  "bot_token": "your_bot_token_here",
+  "admin_ids": [12345678, 87654321],
+  "clones": [
+    "com.roblox.client",
+    "com.roblox.client_1",
+    "com.roblox.client_2"
+  ],
+  "github_url": "https://raw.githubusercontent.com/USER/REPO/main",
+  "default_link": "https://www.roblox.com/share?code=DEFAULT&type=Server",
+  "delays": {
+    "launch": 15,
+    "watchdog": 60
+  }
+}

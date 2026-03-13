@@ -162,8 +162,9 @@ class AegisFarmOS:
             logger.error("No servers in pool!")
             return
 
-        # 3. Link Armor Launch
-        cmd = f"su -c 'am start -a android.intent.action.VIEW -d \"{link}\" {pkg}'"
+        # 3. Secure Double-Escaped Link Armor Launch
+        # Pattern: su -c "am start -a android.intent.action.VIEW -d \"{link}\" {pkg}"
+        cmd = f'su -c "am start -a android.intent.action.VIEW -d \\"{link}\\" {pkg}"'
         subprocess.run(cmd, shell=True)
 
     def watchdog_loop(self):

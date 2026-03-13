@@ -47,12 +47,18 @@ class MemoryManager:
 
     @staticmethod
     def drop_system_caches():
-        """Drop system caches to free up RAM."""
+        """Drop system caches to free up RAM. Handles Read-only FS gracefully."""
         try:
-            subprocess.run("su -c 'sync && echo 3 > /proc/sys/vm/drop_caches'", shell=True)
-            logger.info("System caches dropped.")
+            # First sync
+            subprocess.run("su -c 'sync'", shell=True)
+            # Try to write to drop_caches, ignore if Read-only (typical on some cloud phones)
+            result = subprocess.run("su -c 'echo 3 > /proc/sys/vm/drop_caches'", shell=True, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.warning(f"Note: drop_caches failed (likely Read-only FS). Error: {result.stderr.strip()}")
+            else:
+                logger.info("System caches dropped.")
         except Exception as e:
-            logger.error(f"Failed to drop system caches: {e}")
+            logger.error(f"Error during cache drop: {e}")
 
     @staticmethod
     def set_oom_priority():
