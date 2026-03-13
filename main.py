@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import time
 import asyncio
@@ -56,7 +57,6 @@ def kill_existing_instances():
     """PID Lock to avoid 409 Conflict."""
     try:
         current_pid = os.getpid()
-        # Find other python processes running main.py
         result = subprocess.run("ps -ef | grep python | grep main.py | grep -v grep", shell=True, capture_output=True, text=True)
         for line in result.stdout.strip().split('\n'):
             if line:
@@ -87,20 +87,20 @@ class AegisFarmOS:
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.authenticated(update.effective_user.id): return
         memo = (
-            "🛡 *Aegis Farm OS - Ultimate Memo*\n\n"
-            "📊 *Monitoring:*\n"
+            "\U0001F6E1 *Aegis Farm OS - Ultimate Memo*\n\n"
+            "\U0001F4CA *Monitoring:*\n"
             "/status - System stats\n"
             "/screen [pkg] - Capture clone screeen\n"
             "/help - This memo\n\n"
-            "🤖 *Control:*\n"
+            "\U0001F916 *Control:*\n"
             "/enable [pkg] - Enable watchdog\n"
             "/disable [pkg] - Disable & stop\n"
             "/restart - Restart active clones\n\n"
-            "🔗 *Pool:*\n"
+            "\U0001F517 *Pool:*\n"
             "/add_server [url] - Add link\n"
             "/clear_servers - Wipe pool\n\n"
-            "⚙️ *System:*\n"
-            "/update - Sync all files from GitHub\n"
+            "\U00002699\U0000FE0F *System:*\n"
+            "/update - Sync files from GitHub\n"
         )
         await update.message.reply_text(memo, parse_mode='Markdown')
 
@@ -112,30 +112,32 @@ class AegisFarmOS:
         pkg = context.args[0]
         path = f"/sdcard/screen_{pkg}.png"
         try:
-            await update.message.reply_text(f"📸 Capturing {pkg}...")
+            await update.message.reply_text(f"\U0001F4F8 Capturing {pkg}...")
             subprocess.run(f"su -c 'screencap -p {path}'", shell=True)
             with open(path, 'rb') as f:
                 await update.message.reply_photo(photo=f, caption=f"Snapshot: {pkg}")
         except Exception as e:
-            await update.message.reply_text(f"❌ Screenshot failed: {e}")
+            await update.message.reply_text(f"\U0000274C Screenshot failed: {e}")
 
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.authenticated(update.effective_user.id): return
         report = HardwareMonitor.get_report() + "\n\n"
         for pkg, wd in self.watchdogs.items():
             pid = wd.get_pid()
-            mark = "🟢" if pkg in self.active_clones else "⚪"
-            state = f"✅ PID {pid}" if pid else "❌ Off"
+            mark = "\U0001F7E2" if pkg in self.active_clones else "\U000026AA"
+            state = f"\U00002705 PID {pid}" if pid else "\U0000274C Off"
             report += f"{mark} {pkg}: {state}\n"
-        await update.message.reply_text(f"�    async def enable_clone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text(f"\U0001F4CA SYSTEM STATUS\n\n{report}")
+
+    async def enable_clone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.authenticated(update.effective_user.id): return
         if not context.args: return
         pkg = context.args[0]
         if pkg in self.clones:
             self.active_clones.add(pkg)
-            await update.message.reply_text(f"✅ {pkg} enabled.")
+            await update.message.reply_text(f"\U00002705 {pkg} enabled.")
         else:
-            await update.message.reply_text(f"❌ Unknown package: {pkg}")
+            await update.message.reply_text(f"\U0000274C Unknown package: {pkg}")
 
     async def disable_clone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.authenticated(update.effective_user.id): return
@@ -144,30 +146,59 @@ class AegisFarmOS:
         if pkg in self.clones:
             self.active_clones.discard(pkg)
             self.watchdogs[pkg].force_stop()
-            await update.message.reply_text(f"🛑 {pkg} disabled.")
+            await update.message.reply_text(f"\U0001F6D1 {pkg} disabled.")
         else:
-            await update.message.reply_text(f"❌ Unknown package: {pkg}")
+            await update.message.reply_text(f"\U0000274C Unknown package: {pkg}")
 
     async def add_server(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.authenticated(update.effective_user.id): return
         if not context.args: return
         if ServerEngine.add_server(context.args[0]):
-            await update.message.reply_text("✅ Server added.")
+            await update.message.reply_text("\U00002705 Server added.")
         else:
-            await update.message.reply_text("ℹ️ Already in pool.")
+            await update.message.reply_text("\U00002139\U0000FE0F Already in pool.")
 
     async def clear_servers(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.authenticated(update.effective_user.id): return
         ServerEngine.clear_servers()
-        await update.message.reply_text("🗑 Pool cleared.")
+        await update.message.reply_text("\U0001F5D1 Pool cleared.")
 
     async def restart_clones(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.authenticated(update.effective_user.id): return
-        await update.message.reply_text("🔄 Restarting active clones...")
+        await update.message.reply_text("\U0001F504 Restarting active clones...")
         for pkg in self.active_clones:
             self.launch_clone(pkg)
             await asyncio.sleep(self.config.get("delays", {}).get("launch", 15))
-        await update.message.reply_text("✅ Batch command sent.")
+        await update.message.reply_text("\U00002705 Batch command sent.")
+
+    async def update_system(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.authenticated(update.effective_user.id): return
+        await update.message.reply_text("\U0001F504 Syncing modules from Repo...")
+        
+        base_url = self.config.get("github_url")
+        files = ["main.py", "watchdog_pro.py", "memory_manager.py", "server_engine.py", "hardware_monitor.py", "config.json"]
+        
+        try:
+            import requests
+            for filename in files:
+                url = f"{base_url}/{filename}"
+                success = False
+                for _ in range(3):
+                    try:
+                        resp = requests.get(url, timeout=10)
+                        if resp.status_code == 200:
+                            with open(filename, "wb") as f:
+                                f.write(resp.content)
+                            success = True
+                            break
+                    except: time.sleep(1)
+                if not success:
+                    logger.warning(f"Failed to fetch {filename}")
+            
+            await update.message.reply_text("\U00002705 Sync complete. Restarting...")
+            os.execv(sys.executable, ['python'] + sys.argv)
+        except Exception as e:
+            await update.message.reply_text(f"\U0000274C Update failed: {e}")
 
     def launch_clone(self, pkg):
         logger.info(f"Launching {pkg}...")
@@ -175,9 +206,8 @@ class AegisFarmOS:
         MemoryManager.drop_system_caches()
         
         link = ServerEngine.get_random_server() or self.config.get("default_link")
-        # Final escaping: su -c "am start ... -d '{link}' {pkg}"
         cmd = f'su -c "am start -a android.intent.action.VIEW -d \'{link}\' {pkg}"'
-        time.sleep(0.5) # Stability delay
+        time.sleep(0.5)
         subprocess.run(cmd, shell=True)
 
     def watchdog_loop(self):
@@ -192,7 +222,18 @@ class AegisFarmOS:
             time.sleep(self.config.get("delays", {}).get("watchdog", 60))
 
     def run_bot(self):
-        app = ApplicationBuilder().token(self.config.get("bot_token")).build()
+        async def post_init(application):
+            logger.info("Sending startup notifications...")
+            for admin_id in self.config.get("admin_ids", []):
+                try:
+                    await application.bot.send_message(
+                        chat_id=admin_id, 
+                        text="\U0001F680 Aegis Farm OS: System Online & Config Loaded."
+                    )
+                except Exception as e:
+                    logger.error(f"Notify failed for {admin_id}: {e}")
+
+        app = ApplicationBuilder().token(self.config.get("bot_token")).post_init(post_init).build()
         
         app.add_handler(CommandHandler("start", self.start))
         app.add_handler(CommandHandler("help", self.help_command))
@@ -207,33 +248,15 @@ class AegisFarmOS:
         
         MemoryManager.set_oom_priority()
         MemoryManager.setup_swap()
-
         threading.Thread(target=self.watchdog_loop, daemon=True).start()
         
-        logger.info("System Online. Notify admins...")
-        
-        # Proper startup notification
-        async def post_init(application):
-            for admin_id in self.config.get("admin_ids", []):
-                try:
-                    await application.bot.send_message(chat_id=admin_id, text="🚀 Aegis Farm OS: System Online & Config Loaded.")
-                except Exception as e:
-                    logger.error(f"Startup notify failed for {admin_id}: {e}")
-
-        # Note: ApplicationBuilder.post_init is available in newer v20+
-        # But we can also just run it after start
-        
+        logger.info("Starting polling...")
         app.run_polling()
 
 if __name__ == "__main__":
-n_polling()
-
-if __name__ == "__main__":
     kill_existing_instances()
-    initial_cfg = load_config()
-    # Try remote sync on boot
-    remote_cfg = sync_config(initial_cfg.get("github_url"))
-    final_cfg = remote_cfg if remote_cfg else initial_cfg
-    
+    cfg = load_config()
+    remote_cfg = sync_config(cfg.get("github_url"))
+    final_cfg = remote_cfg if remote_cfg else cfg
     bot = AegisFarmOS(final_cfg)
     bot.run_bot()

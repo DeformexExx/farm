@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import subprocess
 import shutil
@@ -54,10 +55,10 @@ class HardwareMonitor:
         batt = HardwareMonitor.get_battery_info()
         space = HardwareMonitor.get_free_space()
         
-        report = f"🌡 CPU: {temp if temp else 'N/A'}°C\n"
+        report = f"\U0001F321 CPU: {temp if temp else 'N/A'}\u00b0C\n"
         if batt:
-            report += f"🔋 Battery: {batt.get('percentage')}% ({batt.get('status', 'Unknown')})\n"
-        report += f"💾 Free Space: {space:.2f} GB"
+            report += f"\U0001F50B Battery: {batt.get('percentage')}% ({batt.get('status', 'Unknown')})\n"
+        report += f"\U0001F4BE Free Space: {space:.2f} GB"
         return report
 
 if __name__ == "__main__":
