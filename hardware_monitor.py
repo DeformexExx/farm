@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 import os
-import subprocess
-import shutil
+import psutil
+import time
 
 class HardwareMonitor:
     @staticmethod
     def get_cpu_temp():
-        """Attempts to read CPU temperature from common Android paths."""
         paths = [
             "/sys/class/thermal/thermal_zone0/temp",
             "/sys/class/thermal/thermal_zone1/temp",
@@ -23,43 +22,32 @@ class HardwareMonitor:
         return None
 
     @staticmethod
-    def get_battery_info():
-        """Reads battery status via termux-battery-status if available."""
+    def get_uptime():
         try:
-            import json
-            result = subprocess.run(["termux-battery-status"], capture_output=True, text=True)
-            if result.returncode == 0:
-                return json.loads(result.stdout)
+            with open('/proc/uptime', 'r') as f:
+                uptime_seconds = float(f.readline().split()[0])
+                hours = int(uptime_seconds // 3600)
+                minutes = int((uptime_seconds % 3600) // 60)
+                return f"{hours}h {minutes}m"
         except Exception:
-            # Fallback to sysfs if termux-api is not installed
-            try:
-                with open("/sys/class/power_supply/battery/capacity", "r") as f:
-                    capacity = int(f.read().strip())
-                return {"percentage": capacity}
-            except:
-                pass
-        return None
+            return "N/A"
 
     @staticmethod
-    def get_free_space(path="/data"):
-        """Returns free space in GB."""
-        try:
-            total, used, free = shutil.disk_usage(path)
-            return free / (1024**3)
-        except Exception:
-            return 0.0
-
-    @staticmethod
-    def get_report():
+    def get_dashboard_report(active_clones_count):
+        ram = psutil.virtual_memory()
         temp = HardwareMonitor.get_cpu_temp()
-        batt = HardwareMonitor.get_battery_info()
-        space = HardwareMonitor.get_free_space()
+        uptime = HardwareMonitor.get_uptime()
         
-        report = f"\U0001F321 CPU: {temp if temp else 'N/A'}\u00b0C\n"
-        if batt:
-            report += f"\U0001F50B Battery: {batt.get('percentage')}% ({batt.get('status', 'Unknown')})\n"
-        report += f"\U0001F4BE Free Space: {space:.2f} GB"
+        # Simple text for v2 stability
+        report = (
+            f"--- SYSTEM DASHBOARD ---\n"
+            f"RAM: {ram.percent}% ({ram.available // (1024**2)}MB Free)\n"
+            f"TEMP: {temp if temp else 'N/A'} deg C\n"
+            f"UPTIME: {uptime}\n"
+            f"CLONES ACTIVE: {active_clones_count}\n"
+            f"------------------------"
+        )
         return report
 
 if __name__ == "__main__":
-    print(HardwareMonitor.get_report())
+    print(HardwareMonitor.get_dashboard_report(0))
