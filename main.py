@@ -11,7 +11,7 @@ import gc
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 
-# Import Aegis v3 Modules
+# Import Aegis v2.3 Modules
 from hardware_monitor import HardwareMonitor
 from memory_manager import MemoryManager
 from server_engine import ServerEngine
@@ -32,11 +32,6 @@ def fetch_remote_config():
                 data = resp.json()
                 data["bot_token"] = data.get("bot_token", "").strip()
                 data["admin_ids"] = [int(i) for i in data.get("admin_ids", [])]
-                if not data["bot_token"] or data["bot_token"] == "your_bot_token_here":
-                    # Fallback to local if remote is placeholder
-                    if os.path.exists("config.json"):
-                        with open("config.json", "r") as f:
-                            return json.load(f)
                 return data
         except Exception:
             pass
@@ -48,7 +43,7 @@ def fetch_remote_config():
             return json.load(f)
     sys.exit(1)
 
-class AegisFarmOSv3:
+class AegisFarmOSv2:
     def __init__(self, config):
         self.config = config
         self.clones = self.config.get("clones", [])
@@ -64,13 +59,12 @@ class AegisFarmOSv3:
         return user_id in self.config.get("admin_ids", [])
 
     def load_state(self):
-        """Load enabled/disabled state for each clone."""
+        """Load enabled/disabled state."""
         if os.path.exists(STATE_FILE):
             try:
                 with open(STATE_FILE, "r") as f:
                     return json.load(f)
             except: pass
-        # Default: all disabled
         return {pkg: False for pkg in self.clones}
 
     def save_state(self):
@@ -115,7 +109,7 @@ class AegisFarmOSv3:
     async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.auth(update.effective_user.id): return
         await update.message.reply_text(
-            "\U0001F6E1 Aegis FarmOS v3: HARDCORE OPTIMIZATION\nSurgical control active.",
+            "\U0001F6E1 Aegis FarmOS v2.3 Active (Repair Mode)\nDirect launch logic restored.",
             reply_markup=self.get_main_keyboard()
         )
 
@@ -125,27 +119,27 @@ class AegisFarmOSv3:
         text = update.message.text
         
         if text == "\U0001F680 START ALL":
-            self.safe_print("Master Start: Engaging sequence...")
+            self.safe_print("Master Start: Launching farm...")
             for pkg in self.clones:
                 self.state[pkg] = True
             self.save_state()
-            threading.Thread(target=self.staggered_launch_all).start()
-            await update.message.reply_text("\U0001F680 Staggered master launch initiated.")
+            threading.Thread(target=self.launch_all_staggered).start()
+            await update.message.reply_text("\U0001F680 Staggered launch initiated.")
             
         elif text == "\U0001F6D1 STOP ALL":
-            self.safe_print("Master Stop: Terminating all.")
+            self.safe_print("Master Stop: Killing all.")
             for pkg in self.clones:
                 self.state[pkg] = False
                 self.watchdogs[pkg].force_stop()
             self.save_state()
-            await update.message.reply_text("\U0001F6D1 All clones disabled and killed.")
+            await update.message.reply_text("\U0001F6D1 All clones killed and disabled.")
             
         elif text == "\U0001F3AE CLONES":
             await update.message.reply_text("🎮 *Clone Management:*", reply_markup=self.get_clones_keyboard(), parse_mode='Markdown')
 
         elif text == "\U0001F504 UPDATE GITHUB":
-            self.safe_print("Update requested. Syncing with GitHub...")
-            await update.message.reply_text("🔄 Syncing files... System will restart.")
+            self.safe_print("Updating code from GitHub...")
+            await update.message.reply_text("🔄 Syncing... System will restart.")
             self.update_system()
 
         elif text == "\U0001F4CA STATUS":
@@ -163,7 +157,7 @@ class AegisFarmOSv3:
             await update.message.reply_text(f"📟 Console: {'ENABLED' if user_id in self.live_consoles else 'DISABLED'}")
 
         elif text == "\U00002699\U0000FE0F CONFIG":
-            await update.message.reply_text(f"CONFIG:\nClones: {len(self.clones)}\nAdmins: {self.config['admin_ids']}")
+            await update.message.reply_text(f"CONFIG (v2.3):\nClones: {len(self.clones)}")
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -181,8 +175,8 @@ class AegisFarmOSv3:
             pkg = data.replace("start_", "")
             self.state[pkg] = True
             self.save_state()
-            threading.Thread(target=self.safe_launch_staggered, args=(pkg,)).start()
-            await query.answer(f"▶️ Launching {pkg}...")
+            threading.Thread(target=self.safe_launch, args=(pkg,)).start()
+            await query.answer(f"▶️ Starting {pkg}...")
         elif data.startswith("stop_"):
             pkg = data.replace("stop_", "")
             self.state[pkg] = False
@@ -191,28 +185,28 @@ class AegisFarmOSv3:
             await query.answer(f"🛑 Stopped {pkg}.")
         await query.answer()
 
-    def staggered_launch_all(self):
+    def launch_all_staggered(self):
         with self.launch_lock:
             for pkg in self.clones:
                 if self.state.get(pkg):
-                    self.safe_launch_staggered(pkg)
-                    time.sleep(5) # Hard 5s delay
+                    self.safe_launch(pkg)
+                    time.sleep(5)
 
-    def safe_launch_staggered(self, pkg):
-        """v3 Surgical Clean + Launch."""
-        self.safe_print(f"Surgical Launch: {pkg}")
-        # 1. Force Stop
-        subprocess.run(f"su -c 'am force-stop {pkg}'", shell=True)
-        # 2. Deep Clean Cache
-        subprocess.run(f"su -c 'rm -rf /data/data/{pkg}/cache/*'", shell=True)
-        # 3. RAM Flush
-        subprocess.run(f"su -c 'echo 3 > /proc/sys/vm/drop_caches'", shell=True)
+    def safe_launch(self, pkg):
+        """v2.3 Clean + Direct Launch."""
+        self.safe_print(f"Direct Launch: {pkg}")
+        # Fast Clean
+        subprocess.run(f"su -c 'pm trim-caches 999G'", shell=True)
         
-        # Link logic
+        # Link Injection Fix
         link = ServerEngine.get_random_server() or self.config.get("default_link", "")
-        # Surgical Intent format
-        cmd = f"su -c \"am start -a android.intent.action.VIEW -d '{link}' {pkg}/com.roblox.client.Activity\""
+        # Command with properly quoted link and pkg
+        cmd = f"su -c 'am start -a android.intent.action.VIEW -d \"{link}\" {pkg}'"
         
+        # Trigger 15s Grace Period
+        if pkg in self.watchdogs:
+            self.watchdogs[pkg].last_launch_time = time.time()
+            
         subprocess.Popen(
             cmd, shell=True, 
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -220,28 +214,26 @@ class AegisFarmOSv3:
         )
 
     def update_system(self):
-        """GitHub Sync + Self-Restart."""
         try:
             files = ["main.py", "watchdog_pro.py", "memory_manager.py", "hardware_monitor.py", "server_engine.py", "config.json"]
             base_url = self.config.get("github_url", "https://raw.githubusercontent.com/DeformexExx/farm/refs/heads/main")
             for f in files:
                 url = f"{base_url}/{f}"
                 subprocess.run(f"curl -L {url} -o {f}", shell=True)
-            self.safe_print("Sync complete. Restarting...")
             os.execv(sys.executable, ['python'] + sys.argv)
         except Exception as e:
             self.safe_print(f"Update failed: {e}")
 
     def watchdog_thread(self):
-        self.safe_print("v3 Watchdog Online (Selective Mode).")
-        time.sleep(30)
+        self.safe_print("v2.3 Watchdog active (15s grace period enabled).")
+        time.sleep(10)
         while True:
             for pkg in self.clones:
-                if self.state.get(pkg, False): # Only if enabled
+                if self.state.get(pkg, False):
                     wd = self.watchdogs[pkg]
                     if not wd.is_alive():
-                        self.safe_print(f"v3 Auto-Recovery: {pkg}")
-                        self.safe_launch_staggered(pkg)
+                        self.safe_print(f"v2.3 Recovery: {pkg}")
+                        self.safe_launch(pkg)
                         time.sleep(10)
             gc.collect()
             time.sleep(60)
@@ -251,7 +243,7 @@ class AegisFarmOSv3:
             self.app = application
             self.loop = asyncio.get_event_loop()
             for admin_id in self.config["admin_ids"]:
-                try: await application.bot.send_message(admin_id, "Aegis v3 System Online. Surgical mode ready.")
+                try: await application.bot.send_message(admin_id, "Aegis v2.3 Online. System Repaired.")
                 except: pass
 
         app = ApplicationBuilder().token(self.config["bot_token"]).post_init(post_init).build()
@@ -261,10 +253,9 @@ class AegisFarmOSv3:
 
         MemoryManager.set_oom_priority()
         threading.Thread(target=self.watchdog_thread, daemon=True).start()
-        print("v3 Polling Started.")
         app.run_polling()
 
 if __name__ == "__main__":
     cfg = fetch_remote_config()
     time.sleep(5)
-    AegisFarmOSv3(cfg).run()
+    AegisFarmOSv2(cfg).run()
