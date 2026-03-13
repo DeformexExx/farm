@@ -5,13 +5,12 @@ import time
 
 class MemoryManager:
     SWAP_PATH = "/data/local/tmp/swapfile"
-    SWAP_SIZE_GB = 8
+    SWAP_SIZE_GB = 4
 
     @staticmethod
     def _run_su_detached(cmd):
         """Runs su command in detached mode to save RAM."""
         try:
-            # Popen with DEVNULL prevents blocking and buffer overflows
             subprocess.Popen(
                 f"su -c '{cmd}'",
                 shell=True,
@@ -31,7 +30,6 @@ class MemoryManager:
                 return
 
             print(f"Creating {MemoryManager.SWAP_SIZE_GB}GB swap file...")
-            # Use run for setup as it is a one-time prep, but keep it careful
             steps = [
                 f"dd if=/dev/zero of={MemoryManager.SWAP_PATH} bs=1M count={MemoryManager.SWAP_SIZE_GB * 1024}",
                 f"chmod 600 {MemoryManager.SWAP_PATH}",
@@ -46,9 +44,20 @@ class MemoryManager:
             print(f"Swap error: {e}")
 
     @staticmethod
+    def optimize_for_launch():
+        """Kernel-level optimizations before clone flight (v3.1)."""
+        # Enable KSM (Kernel Samepage Merging) if available to save RAM
+        ksm_cmd = "echo 1 > /sys/kernel/mm/ksm/run"
+        # Immediate sync and cache drop
+        flush_cmd = "sync; echo 3 > /proc/sys/vm/drop_caches"
+        
+        subprocess.run(f"su -c '{ksm_cmd}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(f"su -c '{flush_cmd}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    @staticmethod
     def deep_clean_clone(pkg_name):
-        """Strict cleaning as per v2 requirements."""
-        cmd = f"am force-stop {pkg_name} && pm trim-caches 999G && rm -rf /data/data/{pkg_name}/cache/*"
+        """Fast pre-flight cleaning (v2.3+ logic)."""
+        cmd = f"am force-stop {pkg_name} && pm trim-caches 999G"
         MemoryManager._run_su_detached(cmd)
 
     @staticmethod
@@ -68,4 +77,4 @@ class MemoryManager:
 
 if __name__ == "__main__":
     MemoryManager.setup_swap()
-    MemoryManager.system_deep_clean()
+    MemoryManager.optimize_for_launch()
