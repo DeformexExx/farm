@@ -11,8 +11,8 @@
   "com.roblox.cliend", 
   "com.roblox.clieni"
 ]
-  "github_url": "https://raw.githubusercontent.com/USER/REPO/main",
-  "default_link": "https://www.roblox.com/share?code=DEFAULT&type=Server",
+  "github_url": "https://raw.githubusercontent.com/DeformexExx/farm/refs/heads/main/main.py",
+  "default_link": "https://www.roblox.com/share?code=e31840ddb098f441b30d59d9fd5d17c0&type=Server",
   "delays": {
     "launch": 15,
     "watchdog": 60
