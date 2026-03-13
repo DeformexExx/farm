@@ -34,10 +34,12 @@ def sync_config(base_url):
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             new_config = response.json()
-            with open(CONFIG_PATH, "w") as f:
-                json.dump(new_config, f, indent=2)
-            logger.info("Config synced from GitHub.")
-            return new_config
+            # Basic sanity check
+            if "bot_token" in new_config and "admin_ids" in new_config:
+                with open(CONFIG_PATH, "w") as f:
+                    json.dump(new_config, f, indent=2)
+                logger.info("Config synced from GitHub.")
+                return new_config
     except Exception as e:
         logger.warning(f"Failed to sync remote config: {e}")
     return None
@@ -47,11 +49,23 @@ def load_config():
     if not os.path.exists(CONFIG_PATH):
         logger.error(f"CRITICAL: {CONFIG_PATH} not found!")
         sys.exit(1)
-    with open(CONFIG_PATH, "r") as f:
-        config = json.load(f)
-    # Strict validation
-    config['admin_ids'] = [int(i) for i in config.get('admin_ids', [])]
-    return config
+    
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            config = json.load(f)
+        
+        # Validation and Type Conversion
+        if not config.get("bot_token") or config["bot_token"] == "your_bot_token_here":
+            logger.error("CRITICAL: Invalid bot_token in config.json! Please set your actual token.")
+            sys.exit(1)
+            
+        config['admin_ids'] = [int(i) for i in config.get('admin_ids', [])]
+        config['clones'] = config.get('clones', [])
+        
+        return config
+    except Exception as e:
+        logger.error(f"Failed to load config.json: {e}")
+        sys.exit(1)
 
 def kill_existing_instances():
     """PID Lock to avoid 409 Conflict."""
@@ -101,6 +115,7 @@ class AegisFarmOS:
             "/clear_servers - Wipe pool\n\n"
             "\U00002699\U0000FE0F *System:*\n"
             "/update - Sync files from GitHub\n"
+            "\n*Packages:* " + ", ".join(self.clones)
         )
         await update.message.reply_text(memo, parse_mode='Markdown')
 
@@ -110,6 +125,10 @@ class AegisFarmOS:
             await update.message.reply_text("Usage: /screen [pkg]")
             return
         pkg = context.args[0]
+        if pkg not in self.clones:
+            await update.message.reply_text(f"\U0000274C Unknown package: {pkg}")
+            return
+            
         path = f"/sdcard/screen_{pkg}.png"
         try:
             await update.message.reply_text(f"\U0001F4F8 Capturing {pkg}...")
@@ -206,6 +225,7 @@ class AegisFarmOS:
         MemoryManager.drop_system_caches()
         
         link = ServerEngine.get_random_server() or self.config.get("default_link")
+        # Final escaping logic
         cmd = f'su -c "am start -a android.intent.action.VIEW -d \'{link}\' {pkg}"'
         time.sleep(0.5)
         subprocess.run(cmd, shell=True)
@@ -256,7 +276,9 @@ class AegisFarmOS:
 if __name__ == "__main__":
     kill_existing_instances()
     cfg = load_config()
+    # Try remote sync on boot
     remote_cfg = sync_config(cfg.get("github_url"))
-    final_cfg = remote_cfg if remote_cfg else cfg
+    final_cfg = remote_cfg if (remote_cfg and remote_cfg.get("bot_token") != "your_bot_token_here") else cfg
+    
     bot = AegisFarmOS(final_cfg)
     bot.run_bot()

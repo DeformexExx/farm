@@ -23,7 +23,8 @@ class WatchdogPro:
         try:
             result = subprocess.run(f"su -c 'pidof {self.pkg_name}'", shell=True, capture_output=True, text=True)
             if result.returncode == 0:
-                return int(result.stdout.strip().split()[0])
+                output = result.stdout.strip().split()
+                return int(output[0]) if output else None
         except Exception:
             pass
         return None
@@ -94,12 +95,6 @@ class WatchdogPro:
             
         return True
 
-    def check_level4(self):
-        """Level 4: Log Analysis."""
-        # Generic placeholder for log analysis. 
-        # Delta logs usually contain 're-injecting' or 'crash' keys.
-        return True
-
     def is_alive(self):
         pid = self.get_pid()
         if not pid:
@@ -123,6 +118,4 @@ class WatchdogPro:
         self.last_ticks = 0
 
 if __name__ == "__main__":
-    # Example usage
-    wd = WatchdogPro("com.roblox.client")
-    print(f"Is alive: {wd.is_alive()}")
+    logger.info("WatchdogPro module loaded.")
