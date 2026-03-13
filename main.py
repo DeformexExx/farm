@@ -8,334 +8,280 @@ import sys
 import json
 import requests
 import gc
-from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 
-# Import modules
+# Import Aegis v2 Modules
 from hardware_monitor import HardwareMonitor
 from memory_manager import MemoryManager
 from server_engine import ServerEngine
 from watchdog_pro import WatchdogPro
 
+# Constants
 REMOTE_CONFIG_URL = "https://raw.githubusercontent.com/DeformexExx/farm/refs/heads/main/config.json"
-BOOT_TRACKER_FILE = "last_boot.txt"
+BOOT_TRACKER = "last_boot.txt"
+ACTIVE_CLONES_FILE = "active_clones.json"
 
 def fetch_remote_config():
-    """Fetches config directly from GitHub with 5 retries and 10s delay."""
+    """Strict remote fetch with retries."""
     for attempt in range(1, 6):
         try:
-            print(f"Fetching remote config (Attempt {attempt}/5)...")
-            response = requests.get(REMOTE_CONFIG_URL, timeout=15)
-            if response.status_code == 200:
-                data = response.json()
-                # Validation & Processing
+            print(f"Fetch config (Attempt {attempt}/5)...")
+            resp = requests.get(REMOTE_CONFIG_URL, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
                 token = data.get("bot_token", "").strip()
                 admins = [int(i) for i in data.get("admin_ids", [])]
-                clones = data.get("clones", [])
-                
                 if not token or token == "your_bot_token_here":
-                    print("CRITICAL: Remote config contains invalid/placeholder token!")
                     sys.exit(1)
-                
-                # Update data with processed values
                 data["bot_token"] = token
                 data["admin_ids"] = admins
-                data["clones"] = clones
-                print("Remote config loaded successfully.")
+                data["clones"] = data.get("clones", [])
                 return data
-            else:
-                print(f"Failed to fetch config: HTTP {response.status_code}")
-        except Exception as e:
-            print(f"Attempt {attempt} failed: {e}")
-        
+        except Exception:
+            pass
         if attempt < 5:
-            print("Retrying in 10 seconds...")
             time.sleep(10)
-    
-    print("CRITICAL: Failed to fetch remote config after 5 attempts. Exiting.")
     sys.exit(1)
 
-def kill_existing_instances():
-    """PID Lock to avoid 409 Conflict."""
-    try:
-        current_pid = os.getpid()
-        result = subprocess.run("ps -ef | grep python | grep main.py | grep -v grep", shell=True, capture_output=True, text=True)
-        for line in result.stdout.strip().split('\n'):
-            if line:
-                parts = line.split()
-                if len(parts) > 1:
-                    pid = int(parts[1])
-                    if pid != current_pid:
-                        subprocess.run(f"kill -9 {pid}", shell=True)
-                        print(f"Killed legacy instance (PID {pid})")
-    except Exception as e:
-        print(f"PID Lock error: {e}")
-
-class AegisFarmOS:
+class AegisFarmOSv2:
     def __init__(self, config):
         self.config = config
         self.clones = self.config.get("clones", [])
-        self.watchdogs = {pkg: WatchdogPro(pkg) for pkg in self.clones}
-        self.active_clones = set(self.clones)
-        self.is_running = True
-        self.failure_counts = {pkg: 0 for pkg in self.clones}
-        self.app = None
+        self.watchdogs = {pkg: WatchdogPro(pkg, log_func=self.safe_print) for pkg in self.clones}
+        self.is_farming = False 
+        self.last_msg_time = 0
+        self.live_consoles = set() 
+        self.active_clones = self.load_active_clones() # Persistent state
+        self.app = None 
+        self.loop = None
 
-    def authenticated(self, user_id):
+    def auth(self, user_id):
         return user_id in self.config.get("admin_ids", [])
 
+    def load_active_clones(self):
+        """Load enabled clones from JSON."""
+        if os.path.exists(ACTIVE_CLONES_FILE):
+            try:
+                with open(ACTIVE_CLONES_FILE, "r") as f:
+                    data = json.load(f)
+                    # Filter to ensure only valid clones from config are loaded
+                    return set(pkg for pkg in data if pkg in self.clones)
+            except:
+                pass
+        return set()
+
+    def save_active_clones(self):
+        """Save enabled clones to JSON."""
+        with open(ACTIVE_CLONES_FILE, "w") as f:
+            json.dump(list(self.active_clones), f)
+
+    def safe_print(self, text):
+        """Prints to terminal and broadcasts to active Telegram consoles."""
+        print(text)
+        if self.app and self.live_consoles:
+            clean_text = f"📟 [CONSOLE]: {text}"
+            for admin_id in self.live_consoles:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self.app.bot.send_message(chat_id=admin_id, text=clean_text),
+                        self.loop
+                    )
+                except Exception:
+                    pass
+
+    def get_main_keyboard(self):
+        """Aegis v2.2 Reply Keyboard."""
+        keyboard = [
+            [KeyboardButton("\U0001F680 START ALL"), KeyboardButton("\U0001F6D1 STOP ALL")],
+            [KeyboardButton("\U0001F3AE CLONES"), KeyboardButton("\U0001F4CA STATUS")],
+            [KeyboardButton("\U0001F9F9 DEEP CLEAN"), KeyboardButton("\U0001F4DF CONSOLE")],
+            [KeyboardButton("\U0001F4F8 SNAPSHOT"), KeyboardButton("\U00002699\U0000FE0F CONFIG")]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    def get_clones_keyboard(self):
+        """Inline Keyboard for granular control."""
+        keyboard = []
+        for pkg in self.clones:
+            status = "\U00002705" if pkg in self.active_clones else "\U0000274C"
+            row = [
+                InlineKeyboardButton(f"{status} {pkg}", callback_data="none"),
+                InlineKeyboardButton("\U000025B6\U0000FE0F Start", callback_data=f"start_{pkg}"),
+                InlineKeyboardButton("\U000023F9\uFE0F Stop", callback_data=f"stop_{pkg}")
+            ]
+            keyboard.append(row)
+        keyboard.append([InlineKeyboardButton("\U000021BB Refresh", callback_data="refresh_clones")])
+        return InlineKeyboardMarkup(keyboard)
+
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.authenticated(update.effective_user.id): return
-        await self.help_command(update, context)
-
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.authenticated(update.effective_user.id): return
-        
-        keyboard = [[InlineKeyboardButton("\U0001F4F8 Snapshot All Clones", callback_data='snap_all')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        memo = (
-            "\U0001F6E1 *Aegis Farm OS - Direct Remote Mode*\n\n"
-            "\U0001F4CA *Monitoring:*\n"
-            "/status - System stats\n"
-            "/screen [pkg] - Capture specific clone\n"
-            "/help - This memo\n\n"
-            "\U0001F916 *Control:*\n"
-            "/enable [pkg] - Enable watchdog\n"
-            "/disable [pkg] - Disable & stop\n"
-            "/restart - Restart all active\n\n"
-            "\U0001F517 *Pool:*\n"
-            "/add_server [url] - Add link\n"
-            "/clear_servers - Wipe pool\n\n"
-            "\U00002699\U0000FE0F *System:*\n"
-            "/update - Sync modules from GitHub\n"
-            "\n*Clones Loaded:* " + ", ".join(self.clones)
+        if not self.auth(update.effective_user.id): return
+        await update.message.reply_text(
+            "\U0001F6E1 Aegis FarmOS v2.2 Active\nGranular control enabled.",
+            reply_markup=self.get_main_keyboard()
         )
-        await update.message.reply_text(memo, parse_mode='Markdown', reply_markup=reply_markup)
 
-    async def screen(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.authenticated(update.effective_user.id): return
-        if not context.args:
-            await update.message.reply_text("Usage: /screen [pkg]")
+    async def handle_buttons(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        if not self.auth(user_id): return
+        
+        text = update.message.text
+        now = time.time()
+        if now - self.last_msg_time < 0.5:
             return
+        self.last_msg_time = now
+
+        if text == "\U0001F680 START ALL":
+            self.is_farming = True
+            self.active_clones = set(self.clones)
+            self.save_active_clones()
+            self.safe_print("Master Start: All clones engaged.")
+            for pkg in self.clones:
+                self.safe_launch(pkg)
+                await asyncio.sleep(0.5)
+            await update.message.reply_text("\U0001F680 Master automation started. All clones engaged.")
             
-        pkg = context.args[0]
-        if pkg not in self.clones:
-            await update.message.reply_text(f"\U0000274C Unknown package: {pkg}")
-            return
+        elif text == "\U0001F6D1 STOP ALL":
+            self.is_farming = False
+            self.active_clones = set()
+            self.save_active_clones()
+            self.safe_print("Master Stop: All clones terminated.")
+            for pkg in self.clones:
+                self.watchdogs[pkg].force_stop()
+            await update.message.reply_text("\U0001F6D1 All automation stopped. Clones terminated.")
+            
+        elif text == "\U0001F3AE CLONES":
+            await update.message.reply_text(
+                "🎮 *Clone Management:*\nSelect a clone to override:",
+                reply_markup=self.get_clones_keyboard(),
+                parse_mode='Markdown'
+            )
 
-        path = f"/sdcard/screen_{pkg}.png"
-        try:
-            await update.message.reply_text(f"\U0001F4F8 Capturing {pkg}...")
+        elif text == "\U0001F4CA STATUS":
+            dashboard = HardwareMonitor.get_dashboard_report(len(self.active_clones))
+            await update.message.reply_text(f"```\n{dashboard}\n```", parse_mode='Markdown')
+            
+        elif text == "\U0001F9F9 DEEP CLEAN":
+            self.safe_print("Manual deep clean dispatched.")
+            MemoryManager.system_deep_clean()
+            await update.message.reply_text("\U0001F9F9 Deep clean dispatched.")
+            
+        elif text == "\U0001F4F8 SNAPSHOT":
+            path = "/sdcard/aegis_overview.png"
             subprocess.run(f"su -c 'screencap -p {path}'", shell=True)
             with open(path, 'rb') as f:
-                await update.message.reply_photo(photo=f, caption=f"Snapshot: {pkg}")
-        except Exception as e:
-            await update.message.reply_text(f"\U0000274C Screenshot failed: {e}")
+                await update.message.reply_photo(photo=f, caption="System Snapshot")
+
+        elif text == "\U0001F4DF CONSOLE":
+            if user_id in self.live_consoles:
+                self.live_consoles.remove(user_id)
+                await update.message.reply_text("📟 Console stream: DISABLED")
+            else:
+                self.live_consoles.add(user_id)
+                await update.message.reply_text("📟 Console stream: ENABLED")
+
+        elif text == "\U00002699\U0000FE0F CONFIG":
+            clones_list = ", ".join(self.clones)
+            await update.message.reply_text(f"CONFIG:\nClones: {clones_list}\nEnabled: {', '.join(self.active_clones) or 'None'}")
+
+        gc.collect()
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Inline button callbacks for granular control."""
         query = update.callback_query
         user_id = query.from_user.id
-        if not self.authenticated(user_id):
-            await query.answer("Access Denied", show_alert=True)
+        if not self.auth(user_id):
+            await query.answer("Auth required.", show_alert=True)
             return
 
-        if query.data == 'snap_all':
-            await query.answer("Capturing all clones...")
-            await query.edit_message_text("\U0001F4F8 Processing collective snapshot...")
-            
-            for pkg in self.clones:
-                path = f"/sdcard/snap_all_{pkg}.png"
-                try:
-                    subprocess.run(f"su -c 'screencap -p {path}'", shell=True)
-                    time.sleep(0.5)
-                    with open(path, 'rb') as f:
-                        await context.bot.send_photo(chat_id=user_id, photo=f, caption=f"Collective Snapshot: {pkg}")
-                except Exception as e:
-                    await context.bot.send_message(chat_id=user_id, text=f"\U0000274C Failed {pkg}: {e}")
-            
-            await context.bot.send_message(chat_id=user_id, text="\U00002705 Snapshot All sequence complete.")
+        data = query.data
+        if data == "none":
+            await query.answer()
+            return
+        
+        if data == "refresh_clones":
+            await query.edit_message_reply_markup(reply_markup=self.get_clones_keyboard())
+            await query.answer("Refresh complete.")
+            return
 
-    async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.authenticated(update.effective_user.id): return
-        report = HardwareMonitor.get_report() + "\n\n"
-        for pkg, wd in self.watchdogs.items():
-            pid = wd.get_pid()
-            mark = "\U0001F7E2" if pkg in self.active_clones else "\U000026AA"
-            state = f"\U00002705 PID {pid}" if pid else "\U0000274C Off"
-            report += f"{mark} {pkg}: {state}\n"
-        await update.message.reply_text(f"\U0001F4CA SYSTEM STATUS\n\n{report}")
-
-    async def enable_clone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.authenticated(update.effective_user.id): return
-        if not context.args: return
-        pkg = context.args[0]
-        if pkg in self.clones:
+        if data.startswith("start_"):
+            pkg = data.replace("start_", "")
             self.active_clones.add(pkg)
-            await update.message.reply_text(f"\U00002705 {pkg} enabled.")
-        else:
-            await update.message.reply_text(f"\U0000274C Unknown package: {pkg}")
-
-    async def disable_clone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.authenticated(update.effective_user.id): return
-        if not context.args: return
-        pkg = context.args[0]
-        if pkg in self.clones:
-            self.active_clones.discard(pkg)
-            self.watchdogs[pkg].force_stop()
-            await update.message.reply_text(f"\U0001F6D1 {pkg} disabled.")
-        else:
-            await update.message.reply_text(f"\U0000274C Unknown package: {pkg}")
-
-    async def restart_clones(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.authenticated(update.effective_user.id): return
-        await update.message.reply_text("\U0001F504 Restarting all active clones...")
-        for pkg in self.active_clones:
-            self.launch_clone(pkg)
-            await asyncio.sleep(self.config.get("delays", {}).get("launch", 15))
-        await update.message.reply_text("\U00002705 Restart command sequence sent.")
-
-    async def update_system(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.authenticated(update.effective_user.id): return
-        await update.message.reply_text("\U0001F504 Downloading module updates...")
-        
-        base_url = "https://raw.githubusercontent.com/DeformexExx/farm/refs/heads/main"
-        files = ["main.py", "watchdog_pro.py", "memory_manager.py", "server_engine.py", "hardware_monitor.py"]
-        
-        try:
-            for filename in files:
-                url = f"{base_url}/{filename}"
-                success = False
-                for _ in range(3):
-                    try:
-                        resp = requests.get(url, timeout=10)
-                        if resp.status_code == 200:
-                            with open(filename, "wb") as f:
-                                f.write(resp.content)
-                            success = True
-                            break
-                    except: time.sleep(1)
-                if not success:
-                    print(f"Failed to fetch {filename}")
+            self.save_active_clones()
+            self.is_farming = True # Ensure watchdog is running if something is started
+            self.safe_launch(pkg)
+            await query.answer(f"▶️ Starting {pkg}...")
+            await query.edit_message_reply_markup(reply_markup=self.get_clones_keyboard())
             
-            await update.message.reply_text("\U00002705 Modules updated. Restarting OS...")
-            os.execv(sys.executable, ['python'] + sys.argv)
-        except Exception as e:
-            await update.message.reply_text(f"\U0000274C Update failed: {e}")
+        elif data.startswith("stop_"):
+            pkg = data.replace("stop_", "")
+            self.active_clones.discard(pkg)
+            self.save_active_clones()
+            self.watchdogs[pkg].force_stop()
+            await query.answer(f"🛑 Stopping {pkg}...")
+            await query.edit_message_reply_markup(reply_markup=self.get_clones_keyboard())
 
-    def safe_launch(self, package_name):
-        """Memory-safe non-blocking launch using monkey."""
-        print(f"Safe launching {package_name}...")
-        MemoryManager.deep_clean_clone(package_name)
-        MemoryManager.drop_system_caches()
-        
-        # Detached launch to save RAM
-        cmd = f"su -c 'monkey -p {package_name} -c android.intent.category.LAUNCHER 1'"
-        time.sleep(0.5)
-        
+    def safe_launch(self, pkg):
+        self.safe_print(f"v2 granular launch: {pkg}")
+        MemoryManager.deep_clean_clone(pkg)
+        cmd = f"su -c 'monkey -p {pkg} -c android.intent.category.LAUNCHER 1'"
         subprocess.Popen(
-            cmd, 
-            shell=True, 
-            stdout=subprocess.DEVNULL, 
-            stderr=subprocess.DEVNULL, 
+            cmd, shell=True, 
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             preexec_fn=os.setpgrp
         )
 
-    def launch_clone(self, pkg):
-        """Redirects to safe_launch for OOM prevention."""
-        self.safe_launch(pkg)
-
-    async def notify_failure(self, pkg):
-        """Sends Telegram notification if 3 failed attempts reached."""
-        for admin_id in self.config.get("admin_ids", []):
-            try:
-                await self.app.bot.send_message(
-                    chat_id=admin_id, 
-                    text=f"\U000026A0 *CLONE FAILURE*\nPackage: {pkg}\nAttempts: 3 failures in a row.",
-                    parse_mode='Markdown'
-                )
-            except Exception as e:
-                print(f"Notify failure error: {e}")
-
-    def watchdog_loop(self):
-        print("Delaying Watchdog loop post-boot...")
+    def watchdog_thread(self, loop):
+        print("Watchdog v2.2 active.")
         time.sleep(10)
         
-        while self.is_running:
-            for pkg in self.clones:
-                if pkg in self.active_clones:
-                    wd = self.watchdogs[pkg]
-                    if not wd.is_alive():
-                        self.failure_counts[pkg] += 1
-                        print(f"Watchdog: {pkg} failure ({self.failure_counts[pkg]}). Restoring...")
-                        
-                        if self.failure_counts[pkg] == 3:
-                            # Trigger Telegram notification on 3rd failure
-                            asyncio.run_coroutine_threadsafe(self.notify_failure(pkg), self.app.loop)
-                        
-                        self.launch_clone(pkg)
-                        time.sleep(self.config.get("delays", {}).get("launch", 15))
-                    else:
-                        self.failure_counts[pkg] = 0
+        while True:
+            # Watchdog only runs if Farming is enabled AND there are active clones
+            if self.is_farming and self.active_clones:
+                # Use list to avoid 'set changed size during iteration' errors
+                for pkg in list(self.active_clones):
+                    if pkg in self.clones:
+                        wd = self.watchdogs[pkg]
+                        if not wd.is_alive():
+                            self.safe_launch(pkg)
+                            time.sleep(30)
             
-            # Memory Safe: Force garbage collection
             gc.collect()
-            time.sleep(self.config.get("delays", {}).get("watchdog", 60))
+            time.sleep(60)
 
-    def run_bot(self):
+    def run(self):
         async def post_init(application):
-            # Anti-Spam
-            now = time.time()
-            if os.path.exists(BOOT_TRACKER_FILE):
-                try:
-                    with open(BOOT_TRACKER_FILE, "r") as f:
-                        last_boot = float(f.read().strip())
-                        if now - last_boot < 120:
-                            print("Restarting anti-spam: Skipping notification.")
-                            return
-                except: pass
+            self.app = application
+            self.loop = asyncio.get_event_loop()
             
-            with open(BOOT_TRACKER_FILE, "w") as f:
-                f.write(str(now))
-
-            print("Broadcasting System Online...")
-            for admin_id in self.config.get("admin_ids", []):
+            now = time.time()
+            if os.path.exists(BOOT_TRACKER):
                 try:
-                    await application.bot.send_message(
-                        chat_id=admin_id, 
-                        text="\U0001F680 Aegis Farm OS: Online (OOM Protected)"
-                    )
-                except Exception as e:
-                    print(f"Notify error: {e}")
+                    with open(BOOT_TRACKER, "r") as f:
+                        if now - float(f.read().strip()) < 120: return
+                except: pass
+            with open(BOOT_TRACKER, "w") as f: f.write(str(now))
+            
+            for admin_id in self.config["admin_ids"]:
+                try: 
+                    await application.bot.send_message(admin_id, "Aegis v2.2 Online. Granular control ready.")
+                except: pass
 
-        self.app = ApplicationBuilder().token(self.config["bot_token"]).post_init(post_init).build()
+        app = ApplicationBuilder().token(self.config["bot_token"]).post_init(post_init).build()
         
-        self.app.add_handler(CommandHandler("start", self.start))
-        self.app.add_handler(CommandHandler("help", self.help_command))
-        self.app.add_handler(CommandHandler("status", self.status))
-        self.app.add_handler(CommandHandler("screen", self.screen))
-        self.app.add_handler(CommandHandler("enable", self.enable_clone))
-        self.app.add_handler(CommandHandler("disable", self.disable_clone))
-        self.app.add_handler(CommandHandler("restart", self.restart_clones))
-        self.app.add_handler(CommandHandler("update", self.update_system))
-        self.app.add_handler(CallbackQueryHandler(self.handle_callback))
-        
+        app.add_handler(CommandHandler("start", self.start))
+        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_buttons))
+        app.add_handler(CallbackQueryHandler(self.handle_callback))
+
         MemoryManager.set_oom_priority()
         MemoryManager.setup_swap()
-        threading.Thread(target=self.watchdog_loop, daemon=True).start()
+
+        threading.Thread(target=self.watchdog_thread, args=(asyncio.get_event_loop(),), daemon=True).start()
         
-        print("Aegis Heartbeat Active.")
-        self.app.run_polling()
+        print("v2.2 Polling Active.")
+        app.run_polling()
 
 if __name__ == "__main__":
-    kill_existing_instances()
-    # Direct Remote Fetch
-    final_cfg = fetch_remote_config()
-    
-    # Global delay to smooth CPU spike
-    print("Smoothing CPU spike (5s delay)...")
+    cfg = fetch_remote_config()
     time.sleep(5)
-    
-    bot = AegisFarmOS(final_cfg)
-    bot.run_bot()
+    AegisFarmOSv2(cfg).run()

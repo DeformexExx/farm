@@ -1,77 +1,71 @@
 # -*- coding: utf-8 -*-
 import os
 import subprocess
-import logging
 import time
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("MemoryManager")
-
 class MemoryManager:
-    SWAP_PATH = "/data/swapfile"
+    SWAP_PATH = "/data/local/tmp/swapfile"
     SWAP_SIZE_GB = 8
 
     @staticmethod
-    def _run_su(cmd):
-        """Helper to run su commands with delay and try-except."""
+    def _run_su_detached(cmd):
+        """Runs su command in detached mode to save RAM."""
         try:
-            time.sleep(0.5) # Stability delay
-            result = subprocess.run(f"su -c '{cmd}'", shell=True, capture_output=True, text=True)
-            if result.returncode != 0:
-                logger.warning(f"SU Command failed: {cmd} | Error: {result.stderr.strip()}")
-            return result
-        except Exception as e:
-            logger.error(f"Execution error for '{cmd}': {e}")
-            return None
+            # Popen with DEVNULL prevents blocking and buffer overflows
+            subprocess.Popen(
+                f"su -c '{cmd}'",
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setpgrp
+            )
+        except Exception:
+            pass
 
     @staticmethod
     def setup_swap():
-        """Check and setup 8GB swap file on /data."""
+        """Check and setup 4GB swap file on /data/local/tmp."""
         try:
             if os.path.exists(MemoryManager.SWAP_PATH):
-                logger.info("Swap file already exists.")
+                print(f"Swap exists at {MemoryManager.SWAP_PATH}")
                 return
 
-            logger.info(f"Creating {MemoryManager.SWAP_SIZE_GB}GB swap file...")
-            MemoryManager._run_su(f"dd if=/dev/zero of={MemoryManager.SWAP_PATH} bs=1M count={MemoryManager.SWAP_SIZE_GB * 1024}")
-            MemoryManager._run_su(f"chmod 600 {MemoryManager.SWAP_PATH}")
-            MemoryManager._run_su(f"mkswap {MemoryManager.SWAP_PATH}")
-            MemoryManager._run_su(f"swapon {MemoryManager.SWAP_PATH}")
+            print(f"Creating {MemoryManager.SWAP_SIZE_GB}GB swap file...")
+            # Use run for setup as it is a one-time prep, but keep it careful
+            steps = [
+                f"dd if=/dev/zero of={MemoryManager.SWAP_PATH} bs=1M count={MemoryManager.SWAP_SIZE_GB * 1024}",
+                f"chmod 600 {MemoryManager.SWAP_PATH}",
+                f"mkswap {MemoryManager.SWAP_PATH}",
+                f"swapon {MemoryManager.SWAP_PATH}"
+            ]
+            for step in steps:
+                subprocess.run(f"su -c '{step}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(1)
+            print("Swap setup complete.")
         except Exception as e:
-            logger.error(f"Global swap setup error: {e}")
+            print(f"Swap error: {e}")
 
     @staticmethod
     def deep_clean_clone(pkg_name):
-        """Clean caches and textures for a specific clone."""
-        try:
-            base_path = f"/data/data/{pkg_name}"
-            folders_to_clean = ["cache", "code_cache", "app_textures", "app_webview"]
-            for folder in folders_to_clean:
-                path = os.path.join(base_path, folder)
-                MemoryManager._run_su(f"rm -rf {path}/*")
-            logger.info(f"Cleaned caches for {pkg_name}")
-        except Exception as e:
-            logger.error(f"Cleaning error for {pkg_name}: {e}")
+        """Strict cleaning as per v2 requirements."""
+        cmd = f"am force-stop {pkg_name} && pm trim-caches 999G && rm -rf /data/data/{pkg_name}/cache/*"
+        MemoryManager._run_su_detached(cmd)
 
     @staticmethod
-    def drop_system_caches():
-        """Drop system caches to free up RAM. Handles Read-only FS gracefully."""
-        try:
-            MemoryManager._run_su("sync")
-            MemoryManager._run_su("echo 3 > /proc/sys/vm/drop_caches")
-        except Exception as e:
-            logger.error(f"Error during cache drop: {e}")
+    def system_deep_clean():
+        """Ultimate deep clean shell command."""
+        cmd = "sync; echo 3 > /proc/sys/vm/drop_caches; am kill-all; fstrim -v /data"
+        MemoryManager._run_su_detached(cmd)
 
     @staticmethod
     def set_oom_priority():
-        """Set this process to the highest OOM priority."""
+        """Protect bot process from LMK."""
         try:
             pid = os.getpid()
-            MemoryManager._run_su(f"echo -1000 > /proc/{pid}/oom_score_adj")
-        except Exception as e:
-            logger.error(f"Failed to set OOM priority: {e}")
+            subprocess.run(f"su -c 'echo -1000 > /proc/{pid}/oom_score_adj'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
-    # Test (requires root on Android)
-    MemoryManager.set_oom_priority()
-    MemoryManager.drop_system_caches()
+    MemoryManager.setup_swap()
+    MemoryManager.system_deep_clean()
