@@ -20,11 +20,11 @@ echo "------------------------------------------------"
 # 1. Обновление пакетов и установка системных зависимостей
 echo "📦 [1/4] Установка системных пакетов..."
 pkg update && pkg upgrade -y
-pkg install python git tsu sqlite -y
+pkg install python git tsu sqlite python-psutil python-cryptography -y
 
 # 2. Установка Python зависимостей
 echo "🐍 [2/4] Установка Python библиотек..."
-pip install requests python-telegram-bot psutil gspread google-auth oauth2client
+pip install requests python-telegram-bot gspread google-auth oauth2client
 
 # 3. Настройка Termux:Boot (Автозапуск при включении)
 echo "🔌 [3/4] Настройка автозапуска (Termux:Boot)..."
