@@ -9,369 +9,248 @@ import json
 import requests
 import gc
 import logging
-import re
 import psutil
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-# Aegis v5 Core Modules
+# Aegis v6 Core Modules
 from hardware_monitor import HardwareMonitor
 from memory_manager import MemoryManager
 from server_engine import ServerEngine
 from watchdog_pro import WatchdogPro
+from sheet_manager import SheetManager
+from cookie_injector import CookieInjector
 
 # Constants
-REMOTE_CONFIG_URL = "https://raw.githubusercontent.com/DeformexExx/farm/refs/heads/main/config.json"
 STATE_FILE = "state.json"
 LOG_FILE = "aegis.log"
 SCREENSHOT_PATH = "/data/local/tmp/s.png"
+CREDS_FILE = "creds.json"
+SHEET_NAME = "AegisFarmOS"
 
-# Logging setup
+# Identifier (CLI Mode)
+DEVICE_ID = sys.argv[1] if len(sys.argv) > 1 else "MASTER"
+
+# Logging pipeline
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
+    format=f'%(asctime)s [{DEVICE_ID}] [%(levelname)s] %(message)s',
     handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()]
 )
-logger = logging.getLogger("AegisV5")
+logger = logging.getLogger("AegisV6")
 
-def fetch_remote_config():
-    """Fetches config and extracts DEVICE_ID."""
-    for attempt in range(1, 4):
-        try:
-            resp = requests.get(REMOTE_CONFIG_URL, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                data["bot_token"] = data.get("bot_token", "").strip()
-                data["admin_ids"] = [int(i) for i in data.get("admin_ids", [])]
-                # Default DEVICE_ID if missing from remote (user should set locally)
-                if "DEVICE_ID" not in data:
-                    if os.path.exists("config.json"):
-                        with open("config.json", "r") as f:
-                            local = json.load(f)
-                            data["DEVICE_ID"] = local.get("DEVICE_ID", "DEV_UNDEF")
-                return data
-        except Exception: pass
-        time.sleep(5)
-    # Fallback fully local
-    if os.path.exists("config.json"):
-        with open("config.json", "r") as f:
-            return json.load(f)
-    sys.exit(1)
-
-class AegisFleetOrchestrator:
-    def __init__(self, config):
-        self.config = config
-        self.device_id = str(self.config.get("DEVICE_ID", "DEV_1"))
-        self.clones = self.config.get("clones", [])
-        self.watchdogs = {pkg: WatchdogPro(pkg, log_func=self.safe_print) for pkg in self.clones}
-        self.state = self.load_state() 
-        self.app = None 
+class AegisV6Orchestrator:
+    def __init__(self):
+        self.device_id = DEVICE_ID
+        self.config = self.load_local_config()
+        self.sheet = SheetManager(CREDS_FILE, SHEET_NAME)
+        self.injector = CookieInjector(self.safe_print)
+        self.clones_data = {} # pkg -> data from sheet
+        self.watchdogs = {}
+        self.app = None
         self.loop = None
-        self.launch_lock = threading.Lock()
-        self.active_contexts = {} # user_id -> focused_device_id
         
-        # Ghost Purge
+        # Persistence for Cookies (to detect changes)
+        self.cookie_cache = {} # pkg -> last_cookie_value
+        
         self.purge_ghosts()
+
+    def load_local_config(self):
+        if os.path.exists("config.json"):
+            with open("config.json", "r") as f:
+                return json.load(f)
+        return {"bot_token": "", "admin_ids": []}
 
     def purge_ghosts(self):
         try:
             curr_pid = os.getpid()
             cmd = f"su -c \"ps -ef | grep main.py | grep -v grep | grep -v {curr_pid} | awk '{{print $2}}' | xargs kill -9\""
             subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            logger.info(f"[{self.device_id}] Ghosts purged.")
+            logger.info(f"Identity: {self.device_id} | v6 Ghosts purged.")
         except: pass
 
-    def load_state(self):
-        if os.path.exists(STATE_FILE):
-            try:
-                with open(STATE_FILE, "r") as f:
-                    return json.load(f)
-            except: pass
-        return {pkg: False for pkg in self.clones}
-
-    def save_state(self):
-        with open(STATE_FILE, "w") as f:
-            json.dump(self.state, f)
-
     def safe_print(self, text):
-        logger.info(f"[{self.device_id}] {text}")
-        # Broadcast to admins if they have this device as active context
+        prefixed = f"[{self.device_id}] {text}"
+        logger.info(text)
         if self.app:
-            clean_text = f"📟 [{self.device_id}]: {text}"
-            # For simplicity in v5, if user has this device selected, they get logs
-            for user_id, context_id in self.active_contexts.items():
-                if context_id == self.device_id:
-                    try:
-                        asyncio.run_coroutine_threadsafe(
-                            self.app.bot.send_message(chat_id=user_id, text=clean_text),
-                            self.loop
-                        )
-                    except: pass
+            asyncio.run_coroutine_threadsafe(self.broadcast(prefixed), self.loop)
 
-    def auth(self, user_id):
-        return user_id in self.config.get("admin_ids", [])
+    async def broadcast(self, text):
+        for admin_id in self.config.get("admin_ids", []):
+            try: await self.app.bot.send_message(chat_id=admin_id, text=text)
+            except: pass
 
-    def get_fleet_keyboard(self):
-        """Selector for multi-device (example for 3 devices, dynamic in prod)."""
+    def get_main_keyboard(self):
         keyboard = [
-            [InlineKeyboardButton(f"\U0001F4F1 DEV 1", callback_data="select_DEV_1"),
-             InlineKeyboardButton(f"\U0001F4F1 DEV 2", callback_data="select_DEV_2")],
-            [InlineKeyboardButton(f"\U0001F4F1 DEV 3", callback_data="select_DEV_3")],
-            [InlineKeyboardButton("\U0001F3E2 FLEET STATUS", callback_data="fleet_status")]
-        ]
-        return InlineKeyboardMarkup(keyboard)
-
-    def get_focused_keyboard(self):
-        keyboard = [
-            [KeyboardButton("\U0001F3E0 FLEET STATUS")],
-            [KeyboardButton("\u26A1 GLOBAL ACTIONS")],
-            [KeyboardButton("\U0001F3AE CLONE MGMT")],
-            [KeyboardButton("\u2699\uFE0F DEVICE TOOLS")]
+            [KeyboardButton("📊 REFRESH SHEET"), KeyboardButton("📸 SCREENSHOT")],
+            [KeyboardButton("🚀 MASTER RE-INJECT"), KeyboardButton("🛑 STOP FLEET")],
+            [KeyboardButton("🧹 SYSTEM CLEAN"), KeyboardButton("💻 SHELL CONSOLE")]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-    def get_clones_keyboard(self):
-        keyboard = []
-        for pkg in self.clones:
-            is_enabled = self.state.get(pkg, False)
-            sym = "\u2705" if is_enabled else "\u274C"
-            keyboard.append([InlineKeyboardButton(f"{sym} {pkg}", callback_data=f"toggle_{pkg}")])
-        keyboard.append([InlineKeyboardButton("\u2B05 Back", callback_data="back_to_device")])
-        return InlineKeyboardMarkup(keyboard)
-
-    def get_tools_keyboard(self):
-        keyboard = [
-            [InlineKeyboardButton("\U0001F4F8 Snapshot", callback_data="snap"),
-             InlineKeyboardButton("\U0001F9F9 Clean", callback_data="clean")],
-            [InlineKeyboardButton("\U0001F4BB Shell", callback_data="shell_hint"),
-             InlineKeyboardButton("\U0001F517 Edit Link", callback_data="link_hint")],
-            [InlineKeyboardButton("\u2B05 Back", callback_data="back_to_device")]
-        ]
-        return InlineKeyboardMarkup(keyboard)
-
-    def get_global_keyboard(self):
-        keyboard = [
-            [InlineKeyboardButton("\U0001F680 Global Start", callback_data="global_start"),
-             InlineKeyboardButton("\U0001F6D1 Global Stop", callback_data="global_stop")],
-            [InlineKeyboardButton("\U0001F504 Update All", callback_data="global_update"),
-             InlineKeyboardButton("\U0001F4F8 Fleet Snap", callback_data="fleet_snap")],
-            [InlineKeyboardButton("\u2B05 Back", callback_data="back_to_device")]
-        ]
-        return InlineKeyboardMarkup(keyboard)
-
     async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.auth(update.effective_user.id): return
+        if update.effective_user.id not in self.config.get("admin_ids", []): return
         await update.message.reply_text(
-            "\U0001F6E1 *Aegis Fleet Control v5*\nSelect a device to manage or view fleet status:",
-            reply_markup=self.get_fleet_keyboard(),
+            f"🛡️ *Aegis OS v6: Injection Edition*\nDevice: `{self.device_id}`\nSource of Truth: Google Sheets",
+            reply_markup=self.get_main_keyboard(),
             parse_mode='Markdown'
         )
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-        if not self.auth(user_id): return
+        if update.effective_user.id not in self.config.get("admin_ids", []): return
         text = update.message.text
-        focused = self.active_contexts.get(user_id)
 
-        if text == "\U0001F3E0 FLEET STATUS":
-            await self.send_local_stats(update)
-        elif text == "\u26A1 GLOBAL ACTIONS":
-            await update.message.reply_text("\u26A1 *GLOBAL CONTROL*", reply_markup=self.get_global_keyboard(), parse_mode='Markdown')
-        elif text == "\U0001F3AE CLONE MGMT":
-            await update.message.reply_text(f"🎮 *{self.device_id} Clones:*", reply_markup=self.get_clones_keyboard(), parse_mode='Markdown')
-        elif text == "\u2699\uFE0F DEVICE TOOLS":
-            await update.message.reply_text(f"⚙️ *{self.device_id} Tools:*", reply_markup=self.get_tools_keyboard(), parse_mode='Markdown')
-        
-        # Shell logic (Global if no context or prefix)
-        if text.startswith("$") or text.lower().startswith("shell "):
+        if text == "📊 REFRESH SHEET":
+            await update.message.reply_text(f"[{self.device_id}] Syncing rows with Sheet...")
+            threading.Thread(target=self.sync_loop_tick).start()
+            
+        elif text == "🚀 MASTER RE-INJECT":
+            self.safe_print("Forcing fleet re-injection...")
+            threading.Thread(target=self.master_relaunch, args=(True,)).start()
+
+        elif text == "🛑 STOP FLEET":
+            self.safe_print("Stopping all local clones.")
+            for pkg in self.watchdogs:
+                self.watchdogs[pkg].force_stop()
+            await update.message.reply_text(f"[{self.device_id}] All clones stopped.")
+
+        elif text == "📸 SCREENSHOT":
+            await self.take_snap(update.message)
+
+        elif text == "🧹 SYSTEM CLEAN":
+            MemoryManager.system_deep_clean()
+            await update.message.reply_text(f"[{self.device_id}] Deep clean dispatched.")
+
+        elif text.startswith("$") or text.lower().startswith("shell "):
             cmd = text[1:].strip() if text.startswith("$") else text[6:].strip()
-            # If we are the focused device, execute. Otherwise ignore (to avoid duplicates from all devices)
-            if focused == self.device_id:
-                await self.execute_shell(update, cmd)
+            # Basic context check: if cmd starts with ID or "FLEET"
+            if cmd.startswith(self.device_id) or cmd.startswith("FLEET"):
+                real_cmd = cmd.replace(self.device_id, "").replace("FLEET", "").strip()
+                await self.execute_shell(update, real_cmd)
 
     async def execute_shell(self, update: Update, cmd):
         try:
             res = subprocess.run(f"su -c '{cmd}'", shell=True, capture_output=True, text=True, timeout=30)
             out = (res.stdout + res.stderr).strip() or "[No output]"
-            if len(out) > 3000: out = out[:3000] + "...[Truncated]"
-            await update.message.reply_text(f"```bash\n{out}\n```", parse_mode='Markdown')
+            await update.message.reply_text(f"```bash\n[{self.device_id}]\n{out[:3500]}\n```", parse_mode='Markdown')
         except Exception as e:
-            await update.message.reply_text(f"Error: {e}")
-
-    async def send_local_stats(self, update: Update):
-        active = sum(1 for v in self.state.values() if v)
-        dis = len(self.clones) - active
-        clones_str = f"{active}/{len(self.clones)} (Disabled: {dis})"
-        report = HardwareMonitor.get_dashboard_report(self.device_id, clones_str)
-        await update.message.reply_text(f"```\n{report}\n```", parse_mode='Markdown')
-
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        query = update.callback_query
-        user_id = query.from_user.id
-        if not self.auth(user_id): return
-        data = query.data
-
-        # Multi-Device Selection
-        if data.startswith("select_"):
-            dev = data.replace("select_", "")
-            self.active_contexts[user_id] = dev
-            if dev == self.device_id:
-                await query.message.reply_text(f"\u2705 Switched context to {dev}", reply_markup=self.get_focused_keyboard())
-            await query.answer()
-
-        elif data == "fleet_status":
-            await self.send_local_stats(update)
-            await query.answer()
-
-        elif data == "back_to_device":
-            await query.edit_message_text(f"Managed Device: {self.device_id}", reply_markup=self.get_focused_keyboard())
-            await query.answer()
-
-        # Local Actions (only if focused)
-        focused = self.active_contexts.get(user_id)
-        if focused == self.device_id:
-            if data.startswith("toggle_"):
-                pkg = data.replace("toggle_", "")
-                self.state[pkg] = not self.state.get(pkg, False)
-                self.save_state()
-                await query.edit_message_reply_markup(reply_markup=self.get_clones_keyboard())
-            elif data == "snap":
-                await self.take_snap(query.message)
-            elif data == "clean":
-                MemoryManager.system_deep_clean()
-                await query.answer("\U0001F9F9 System cleaning...")
-
-        # Global Actions (all devices respond)
-        if data == "global_start":
-            self.master_start()
-            await query.answer("\u26A1 Fleet start sequence initiated.")
-        elif data == "global_stop":
-            for pkg in self.clones:
-                self.state[pkg] = False
-                self.watchdogs[pkg].force_stop()
-            self.save_state()
-            await query.answer("\U0001F6D1 Fleet stopped.")
-        elif data == "fleet_snap":
-            await self.take_snap(query.message)
-            await query.answer()
-        elif data == "global_update":
-            self.update_system()
+            await update.message.reply_text(f"[{self.device_id}] Shell Err: {e}")
 
     async def take_snap(self, message):
         try:
             subprocess.run(f"su -c 'screencap -p {SCREENSHOT_PATH}'", shell=True)
             if os.path.exists(SCREENSHOT_PATH):
                 with open(SCREENSHOT_PATH, 'rb') as f:
-                    await message.reply_photo(photo=f, caption=f"\U0001F4F8 Snapshot: {self.device_id}")
+                    await message.reply_photo(photo=f, caption=f"📸 Snapshot: {self.device_id}")
                 os.remove(SCREENSHOT_PATH)
         except: pass
 
-    def parse_roblox_link(self, link):
-        """Smart parser for roblox links (v5)."""
-        if "privateServerLinkCode" in link:
-            # Already a direct intent-ish link or raw URL
-            return link
-        if "roblox.com/games/" in link:
-            # Extract ID and try to make direct roblox:// intent
-            match = re.search(r'games/(\d+)', link)
-            if match:
-                game_id = match.group(1)
-                return f"roblox://placeId={game_id}"
-        return link
-
-    def safe_launch(self, pkg):
-        """v5 Optimized Launch with RAM Threshold."""
-        logger.info(f"[{self.device_id}] Launching {pkg}")
+    def sync_loop_tick(self):
+        """Single tick of the sheet sync loop."""
+        if not self.sheet.connect(): return
         
-        # RAM Threshold Check (400MB)
-        mem = psutil.virtual_memory()
-        if mem.available < 400 * 1024 * 1024:
-            self.safe_print("\u26A0\uFE0F Low RAM (<400MB). Pausing launch 15s...")
-            time.sleep(15)
+        clones = self.sheet.get_my_clones(self.device_id)
+        for c in clones:
+            pkg = f"com.roblox.{c['instance']}"
+            self.clones_data[pkg] = c
             
-        # I/O Relief
-        subprocess.run("su -c 'sync; echo 3 > /proc/sys/vm/drop_caches'", shell=True)
+            # Watchdog initialization
+            if pkg not in self.watchdogs:
+                self.watchdogs[pkg] = WatchdogPro(pkg, self.safe_print)
+
+            # Cookie Change Detection
+            new_cookie = c['cookie']
+            if self.cookie_cache.get(pkg) != new_cookie:
+                self.safe_print(f"Cookie change detected for {c['instance']}. Injecting...")
+                self.cookie_cache[pkg] = new_cookie
+                threading.Thread(target=self.smart_launch, args=(pkg,)).start()
         
-        # Link Parsing
-        raw_link = ServerEngine.get_random_server() or self.config.get("default_link", "")
-        link = self.parse_roblox_link(raw_link)
-        
+        # Cleanup watchdogs for clones removed from sheet
+        current_pkgs = [f"com.roblox.{c['instance']}" for c in clones]
+        removed = set(self.watchdogs.keys()) - set(current_pkgs)
+        for r_pkg in removed:
+            self.watchdogs[r_pkg].force_stop()
+            del self.watchdogs[r_pkg]
+            del self.clones_data[r_pkg]
+
+    def smart_launch(self, pkg):
+        """v6 Smart Launch: Validate -> Status: Starting -> Inject -> Start -> Status: Online."""
+        data = self.clones_data.get(pkg)
+        if not data: return
+
+        # 1. API Validation
+        if not self.injector.validate_cookie(data['cookie']):
+            self.safe_print(f"❌ INVALID COOKIE for {data['name']}. Notifying owner.")
+            self.sheet.update_status(data['row'], "❌ Invalid")
+            return
+
+        # 2. Status: Starting
+        self.sheet.update_status(data['row'], "⏳ Starting")
+
+        # 3. Inject
+        if self.injector.inject(data['instance'], data['cookie']):
+            # 4. Launch (Staggered)
+            self.safe_launch_command(pkg)
+            # 5. Status: Online
+            time.sleep(10) # Wait for start to settle
+            self.sheet.update_status(data['row'], "✅ Online")
+        else:
+            self.safe_print(f"Injection failed for {pkg}")
+            self.sheet.update_status(data['row'], "⚠️ Inject Error")
+
+    def safe_launch_command(self, pkg):
+        """Executes the am start command."""
+        self.safe_print(f"Starting {pkg}...")
+        MemoryManager.v4_pre_launch_optimize()
+        link = ServerEngine.get_random_server() or self.config.get("default_link", "")
         cmd = f"su -c 'am start -a android.intent.action.VIEW -d \"{link}\" {pkg}'"
         
         self.watchdogs[pkg].last_launch_time = time.time()
         subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=os.setpgrp)
         
         # Priority renice
-        threading.Thread(target=self.wait_and_renice, args=(pkg,)).start()
+        threading.Thread(target=self.renice_task, args=(pkg,)).start()
 
-    def wait_and_renice(self, pkg):
+    def renice_task(self, pkg):
         time.sleep(10)
         pid = self.watchdogs[pkg].get_pid()
         if pid:
             subprocess.run(f"su -c 'renice -n -20 -p {pid}'", shell=True)
-            self.safe_print(f"Priority -20 set for {pkg} (PID {pid})")
 
-    def master_start(self):
-        for pkg in self.clones: self.state[pkg] = True
-        self.save_state()
-        def sequence():
-            for pkg in self.clones:
-                if self.state.get(pkg):
-                    self.safe_launch(pkg)
-                    time.sleep(10) # v5 stagger
-        threading.Thread(target=sequence).start()
-
-    def maintenance_task(self):
+    def watchdog_loop(self):
+        self.safe_print("Watchdog & Sync Loop active (3-5 min cycles).")
         while True:
-            time.sleep(1800)
-            subprocess.run("su -c 'pm trim-caches 999G'", shell=True)
-
-    def watchdog_thread(self):
-        self.safe_print("v5 Watchdog Online (L1+L2).")
-        time.sleep(60)
-        while True:
-            for pkg in self.clones:
-                if self.state.get(pkg, False):
-                    wd = self.watchdogs[pkg]
-                    if not wd.is_alive():
-                        self.safe_print(f"v5 Recovery: {pkg}")
-                        self.safe_launch(pkg)
-                        time.sleep(15)
+            # Sync with Sheet
+            self.sync_loop_tick()
+            
+            # Local Health Check
+            for pkg, wd in self.watchdogs.items():
+                if not wd.check_health():
+                    self.safe_print(f"Recovery Triggered for {pkg}")
+                    threading.Thread(target=self.smart_launch, args=(pkg,)).start()
+            
             gc.collect()
-            time.sleep(60)
+            time.sleep(240) # 4 minutes cycle
 
-    def update_system(self):
-        try:
-            files = ["main.py", "watchdog_pro.py", "memory_manager.py", "hardware_monitor.py", "server_engine.py", "config.json"]
-            base_url = self.config.get("github_url", "https://raw.githubusercontent.com/DeformexExx/farm/refs/heads/main")
-            for f in files:
-                url = f"{base_url}/{f}"
-                subprocess.run(f"curl -L {url} -o {f}", shell=True)
-            os.execv(sys.executable, ['python'] + sys.argv)
-        except Exception as e: self.safe_print(f"Update failed: {e}")
+    def master_relaunch(self, force=False):
+        for pkg in self.watchdogs:
+            threading.Thread(target=self.smart_launch, args=(pkg,)).start()
+            time.sleep(15)
 
     def run(self):
         async def post_init(application):
             self.app = application
             self.loop = asyncio.get_event_loop()
-            if self.config.get("global_auto_start"):
-                threading.Timer(30.0, self.master_start).start()
-            for admin_id in self.config["admin_ids"]:
-                try: await application.bot.send_message(admin_id, f"🚢 Aegis v5 Fleet Control: {self.device_id} ONLINE.")
-                except: pass
+            await self.broadcast(f"🚢 Aegis v6 Injection Online: {self.device_id}")
 
         app = ApplicationBuilder().token(self.config["bot_token"]).post_init(post_init).build()
         app.add_handler(CommandHandler("start", self.start_cmd))
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_text))
-        app.add_handler(CallbackQueryHandler(self.handle_callback))
         
-        MemoryManager.set_oom_priority()
         MemoryManager.setup_swap()
-        threading.Thread(target=self.watchdog_thread, daemon=True).start()
-        threading.Thread(target=self.maintenance_task, daemon=True).start()
+        threading.Thread(target=self.watchdog_loop, daemon=True).start()
         app.run_polling()
 
 if __name__ == "__main__":
-    cfg = fetch_remote_config()
     time.sleep(5)
-    AegisFleetOrchestrator(cfg).run()
+    AegisV6Orchestrator().run()

@@ -8,26 +8,25 @@ class WatchdogPro:
     def __init__(self, pkg_name, log_func=print):
         self.pkg_name = pkg_name
         self.log_func = log_func 
-        self.thread_fail_count = 0
         self.last_launch_time = 0
+        self.fail_count = 0
 
     def log(self, text):
         self.log_func(f"[{self.pkg_name}] {text}")
 
     def get_pid(self):
-        """Simple PID check using pidof."""
         try:
             result = subprocess.run(f"su -c 'pidof {self.pkg_name}'", shell=True, capture_output=True, text=True)
             if result.returncode == 0:
                 pids = result.stdout.strip().split()
                 return int(pids[0]) if pids else None
-        except Exception:
-            pass
+        except Exception: pass
         return None
 
     def get_thread_count(self, pid):
-        """Counts threads for a given PID via psutil."""
+        """Counts threads for a given PID. v6 uses /proc/[pid]/status effectively."""
         try:
+            # Using psutil as a robust wrapper for /proc
             proc = psutil.Process(pid)
             return len(proc.threads())
         except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -36,51 +35,40 @@ class WatchdogPro:
             self.log(f"Thread check error: {e}")
             return 0
 
-    def is_alive(self):
+    def check_health(self):
         """
-        v5 Multi-Layer Watchdog:
-        1. 30s Cooldown after any launch.
-        2. L2 (Process Watch): If PID is missing -> immediate restart.
-        3. L1 (Thread Watch): If threads < 130 for 3 checks -> force-stop & restart.
+        v6 Health Check:
+        1. 30s grace period.
+        2. PID missing -> Needs Restart.
+        3. Threads < 110 (significant drop below 130) -> Needs Restart.
         """
         now = time.time()
-        # 30s Grace Period (v5)
         if now - self.last_launch_time < 30:
             return True
 
         pid = self.get_pid()
-        # L2: PID check
         if not pid:
-            self.log("L2: Process missing (PID not found).")
+            self.log("L2: Process missing.")
             return False
 
-        # L1: Thread Check
         threads = self.get_thread_count(pid)
-        if threads < 130:
-            self.thread_fail_count += 1
-            self.log(f"L1 Alert: low threads ({threads}) | Fail count: {self.thread_fail_count}/3")
-            if self.thread_fail_count >= 3:
-                self.log(f"L1: Frozen detected (< 130 threads).")
-                self.thread_fail_count = 0
+        # "Significantly below 130" - setting threshold at 110
+        if threads < 110:
+            self.fail_count += 1
+            self.log(f"L1: Critical low threads ({threads}). Counter: {self.fail_count}/2")
+            if self.fail_count >= 2:
+                self.log(f"L1: Freeze confirmed ({threads} threads).")
+                self.fail_count = 0
                 return False
         else:
-            self.thread_fail_count = 0 # Proper recovery reset
+            self.fail_count = 0
             
         return True
 
     def force_stop(self):
-        """Surgical force stop."""
-        self.log("Dispatched surgical stop.")
-        try:
-            subprocess.Popen(
-                f"su -c 'am force-stop {self.pkg_name}'",
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-        except Exception: pass
-        self.thread_fail_count = 0
+        subprocess.run(f"su -c 'am force-stop {self.pkg_name}'", shell=True)
         self.last_launch_time = 0
+        self.fail_count = 0
 
 if __name__ == "__main__":
-    print("WatchdogPro v5 (L1/L2) Loaded.")
+    print("WatchdogPro v6 Loaded.")
