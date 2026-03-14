@@ -37,10 +37,10 @@ class WatchdogPro:
 
     def check_health(self):
         """
-        v6 Health Check:
+        v6.1 Silent Health Check:
         1. 30s grace period.
-        2. PID missing -> Needs Restart.
-        3. Threads < 110 (significant drop below 130) -> Needs Restart.
+        2. PID missing -> Silent False.
+        3. Threads < 110 -> Silent False.
         """
         now = time.time()
         if now - self.last_launch_time < 30:
@@ -48,16 +48,14 @@ class WatchdogPro:
 
         pid = self.get_pid()
         if not pid:
-            self.log("L2: Process missing.")
+            # Silent recovery
             return False
 
         threads = self.get_thread_count(pid)
-        # "Significantly below 130" - setting threshold at 110
         if threads < 110:
             self.fail_count += 1
-            self.log(f"L1: Critical low threads ({threads}). Counter: {self.fail_count}/2")
             if self.fail_count >= 2:
-                self.log(f"L1: Freeze confirmed ({threads} threads).")
+                # Silent recovery
                 self.fail_count = 0
                 return False
         else:
