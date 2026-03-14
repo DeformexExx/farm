@@ -26,7 +26,7 @@ class MemoryManager:
         """Check and setup 4GB swap file on /data/local/tmp."""
         try:
             if os.path.exists(MemoryManager.SWAP_PATH):
-                print(f"Swap exists at {MemoryManager.SWAP_PATH}")
+                print(f"Swap existing at {MemoryManager.SWAP_PATH}")
                 return
 
             print(f"Creating {MemoryManager.SWAP_SIZE_GB}GB swap file...")
@@ -44,26 +44,25 @@ class MemoryManager:
             print(f"Swap error: {e}")
 
     @staticmethod
-    def optimize_for_launch():
-        """Kernel-level optimizations before clone flight (v3.1)."""
-        # Enable KSM (Kernel Samepage Merging) if available to save RAM
-        ksm_cmd = "echo 1 > /sys/kernel/mm/ksm/run"
-        # Immediate sync and cache drop
-        flush_cmd = "sync; echo 3 > /proc/sys/vm/drop_caches"
-        
-        subprocess.run(f"su -c '{ksm_cmd}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(f"su -c '{flush_cmd}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    def v4_pre_launch_optimize():
+        """I/O and Thermal Protection (v4)."""
+        # RAM flush and Sync to relieve I/O pressure
+        cmd = "sync; echo 3 > /proc/sys/vm/drop_caches"
+        subprocess.run(f"su -c '{cmd}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     @staticmethod
-    def deep_clean_clone(pkg_name):
-        """Fast pre-flight cleaning (v2.3+ logic)."""
-        cmd = f"am force-stop {pkg_name} && pm trim-caches 999G"
-        MemoryManager._run_su_detached(cmd)
+    def set_priority(pid):
+        """Sets highest CPU priority for the game PID (v4)."""
+        try:
+            cmd = f"renice -n -20 -p {pid}"
+            subprocess.run(f"su -c '{cmd}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
     @staticmethod
-    def system_deep_clean():
-        """Ultimate deep clean shell command."""
-        cmd = "sync; echo 3 > /proc/sys/vm/drop_caches; am kill-all; fstrim -v /data"
+    def periodic_trim():
+        """Aggressive cache trim (runs every 30m in v4)."""
+        cmd = "pm trim-caches 999G"
         MemoryManager._run_su_detached(cmd)
 
     @staticmethod
@@ -77,4 +76,4 @@ class MemoryManager:
 
 if __name__ == "__main__":
     MemoryManager.setup_swap()
-    MemoryManager.optimize_for_launch()
+    MemoryManager.v4_pre_launch_optimize()
