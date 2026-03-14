@@ -20,18 +20,22 @@ mkdir -p "$BOOT_DIR"
 # 2. Create the boot script
 cat <<EOF > "$BOOT_SCRIPT"
 #!/bin/bash
-# Aegis Autonomous Boot Script
+# Aegis Autonomous Boot Script v7
 # Generated for: $DEVICE_ID
 
 # Wake lock to prevent Android from killing Termux
 termux-wake-lock
 
+# Синхронизация времени (критично для Google Sheets JWT)
+echo "[AEGIS] Синхронизация времени..."
+ntpdate -u pool.ntp.org || true
+
 cd ~/farm
-echo "[AEGIS] Syncing with GitHub..."
+echo "[AEGIS] Синхронизация с GitHub..."
 git pull
 
 # Launch with root privileges and the specified ID
-echo "[AEGIS] Starting Aegis OS v5.2 as $DEVICE_ID..."
+echo "[AEGIS] Запуск Aegis OS v7 как $DEVICE_ID..."
 tsu -c "python main.py $DEVICE_ID"
 EOF
 
