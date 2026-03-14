@@ -1,6 +1,9 @@
 {
+  "DEVICE_ID": "DEV_1",
   "bot_token": "8640547661:AAGi1FN138glWQPnRDAkjwm5ssImv37MV5A",
-  "admin_ids": [6961471062],
+  "admin_ids": [
+    6961471062
+  ],
   "clones": [
     "com.roblox.clienb",
     "com.roblox.clienc",
@@ -11,10 +14,5 @@
     "com.roblox.clienh",
     "com.roblox.clieni"
   ],
-  "github_url": "https://raw.githubusercontent.com/DeformexExx/farm/refs/heads/main",
-  "default_link": "https://www.roblox.com/share?code=e31840ddb098f441b30d59d9fd5d17c0&type=Server",
-  "delays": {
-    "launch": 30,
-    "watchdog": 120
-  }
+  "global_auto_start": true
 }
