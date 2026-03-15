@@ -4,14 +4,14 @@ from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, 
 class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
-        """Premium Liquid Glass Header"""
+        """Premium Liquid Glass Header - V3.0"""
         return (
-            f"💎 *AEGIS OVERLORD v2.0* 💎\n"
+            f"💎 *AEGIS OVERLORD v3.0* 💎\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"⚡️ *SYSTEM STATUS:* [💠 ONLINE]\n"
             f"📱 *ACTIVE DEVICE:* `{device_id}`\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"Добро пожаловать в панель управления. Выберите раздел ниже:"
+            f"Добро пожаловать в панель управления ALPHA."
         )
 
     @staticmethod
@@ -83,13 +83,14 @@ class UIManager:
             f"🧠 *RAM:* `{ram}` | 🚀 *CPU:* `{cpu}`\n"
             f"🌡 *TEMP:* `{temp}`\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"✨ _System Status: Stable_"
+            f"✨ _Industrial Stability Active_"
         )
 
     @staticmethod
     def format_clones_hub(clones_data: list, status_map: dict, persistence_targets: list) -> str:
-        """High-density card blocks per clone - V3.0 Hub"""
-        msg = "💎 *CLONE MANAGEMENT HUB*\n\n"
+        """Industrial High-Density Card Blocks - V3.0 Hub"""
+        msg = "💎 *CLONE MANAGEMENT HUB V3.0*\n\n"
+        msg += "━━━━━━━━━━━━━━━━━━\n"
         
         for clone in clones_data:
             name = clone.get("name", "Unknown")
@@ -113,13 +114,12 @@ class UIManager:
             # State Label
             state_label = "👤 ON (Synced)" if is_target else "🌑 OFF"
             
-            msg += "━━━━━━━━━━━━━━━━━━\n\n"
             msg += f"[🎮 *{name.upper()}*]\n"
             msg += f"STATUS: {indicator}\n"
             msg += f"STATE: {state_label}\n"
-            msg += f"WATCHDOG: 🧵 Threads: {thr_count}\n\n"
+            msg += f"WATCHDOG: 🧵 Threads: {thr_count}\n"
+            msg += "━━━━━━━━━━━━━━━━━━\n"
                 
-        msg += "━━━━━━━━━━━━━━━━━━"
         return msg
 
 

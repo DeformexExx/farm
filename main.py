@@ -20,6 +20,8 @@ from injection_engine import InjectionEngine
 from bash_utils import run_bash
 from persistence_manager import PersistenceManager
 
+VERSION = "3.0"
+
 # IDENTITY & PATHS
 if len(sys.argv) < 2:
     print("❌ Укажите DEVICE_ID. Пример: python main.py DEV_2")
@@ -38,7 +40,7 @@ logging.basicConfig(
     level=logging.INFO,
     format=f'%(asctime)s [{DEVICE_ID}] [%(levelname)s] %(message)s'
 )
-logger = logging.getLogger("AegisV20")
+logger = logging.getLogger(f"AegisV{VERSION.replace('.', '')}")
 
 class TelegramLogHandler(logging.Handler):
     """Custom logging handler to buffer logs and send to LogStreamer."""
@@ -160,7 +162,10 @@ class AegisNebulaBot:
                 if name:
                     status_map[name] = await MonitorEngine.get_clone_status(name)
             
-            text = UIManager.format_clones_hub(self.config.clones_data, status_map, self.persistence.targets)
+            # SAFE ACCESS: Ensure targets exists
+            p_targets = getattr(self.persistence, 'targets', [])
+            
+            text = UIManager.format_clones_hub(self.config.clones_data, status_map, p_targets)
             self._dashboard_msg = await update.message.reply_text(
                 text, 
                 reply_markup=UIManager.get_clones_hub_keyboard(self.config.clones_data), 
@@ -168,7 +173,7 @@ class AegisNebulaBot:
             )
         except Exception as e:
             logger.error(f"Error rendering Clones Menu: {e}")
-            await update.message.reply_text(f"❌ Ошибка при отрисовке меню: {e}")
+            await update.message.reply_text(f"❌ Критическая ошибка меню: {e}")
 
     async def send_system_menu(self, update: Update):
         text = "⚙️ *SYSTEM SETTINGS*"
@@ -207,6 +212,7 @@ class AegisNebulaBot:
             await update.message.reply_text(msg, parse_mode='Markdown')
 
 
+            
     async def update_dashboard(self):
         """Updates the last sent clones menu if it exists - V3.0"""
         if not self._dashboard_msg:
@@ -220,7 +226,8 @@ class AegisNebulaBot:
                 if name:
                     status_map[name] = await MonitorEngine.get_clone_status(name)
             
-            text = UIManager.format_clones_hub(self.config.clones_data, status_map, self.persistence.targets)
+            p_targets = getattr(self.persistence, 'targets', [])
+            text = UIManager.format_clones_hub(self.config.clones_data, status_map, p_targets)
             keyboard = UIManager.get_clones_hub_keyboard(self.config.clones_data)
             
             await self._dashboard_msg.edit_text(text, reply_markup=keyboard, parse_mode='Markdown')
@@ -500,7 +507,7 @@ class AegisNebulaBot:
         asyncio.create_task(self.watchdog_task())
         asyncio.create_task(self.sanity_check())
         
-        logger.info(f"💎 PROJECT AEGIS V3.0 is ONLINE for {self.device_id}")
+        logger.info(f"💎 PROJECT AEGIS V{VERSION} is ONLINE for {self.device_id}")
         
         # Start Polling
         await self.application.updater.start_polling(drop_pending_updates=True)

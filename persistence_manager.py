@@ -11,7 +11,8 @@ class PersistenceManager:
         self.data = {
             "auto_restore": True,
             "console_mode": False,
-            "target_clones": []
+            "target_clones": [],
+            "targets": []
         }
         self.load()
 
@@ -56,18 +57,23 @@ class PersistenceManager:
     @property
     def targets(self) -> list:
         """Alias for target_clones (V3.0 Compatibility)"""
-        return self.target_clones
+        val = self.data.get("targets", [])
+        if not val: # Fallback to target_clones
+             return self.target_clones
+        return val if isinstance(val, list) else []
 
     def add_target(self, name: str):
-        clones = self.target_clones
+        clones = self.targets
         if name not in clones:
             clones.append(name)
-            self.data["target_clones"] = clones
+            self.data["targets"] = clones
+            self.data["target_clones"] = clones # Sync legacy
             self.save()
 
     def remove_target(self, name: str):
-        clones = self.target_clones
+        clones = self.targets
         if name in clones:
             clones.remove(name)
-            self.data["target_clones"] = clones
+            self.data["targets"] = clones
+            self.data["target_clones"] = clones # Sync legacy
             self.save()
