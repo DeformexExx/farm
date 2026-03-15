@@ -93,7 +93,8 @@ class UIManager:
         for clone in clones_data:
             name = clone.get("name", "Unknown")
             raw_status = status_map.get(name, "Offline")
-            is_target = name in persistence_targets # Works for dict (keys)
+            # Safe check for dictionary keys
+            is_target = name in persistence_targets if isinstance(persistence_targets, dict) else name in persistence_targets
             
             # Status Indicator
             if "Offline" in raw_status:

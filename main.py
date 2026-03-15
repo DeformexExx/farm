@@ -97,9 +97,9 @@ class AegisNebulaBot:
         self.config = ConfigManager(self.device_id, FARM_DIR)
         self.persistence = PersistenceManager(FARM_DIR)
         self.application = None
-        # Use targets for consistent naming V3.0
+        # SAFE ACCESS: Ensure targets exists (V3.0 Critical)
         p_targets = getattr(self.persistence, 'targets', {})
-        self.active_clones = set(p_targets.keys()) if self.persistence.auto_restore else set()
+        self.active_clones = set(p_targets.keys()) if (self.persistence.auto_restore and isinstance(p_targets, dict)) else set()
         self._dashboard_msg = None
         self.console_mode = self.persistence.console_mode
         self._log_handler: logging.Handler | None = None
@@ -151,10 +151,10 @@ class AegisNebulaBot:
                 name = clone.get("name")
                 if name: status_map[name] = await MonitorEngine.get_clone_status(name)
             
-            # SAFE ACCESS: Ensure targets exists (V3.0 Critical)
-            p_targets = getattr(self.persistence, 'targets', {})
+            # SAFE ACCESS: Ensure targets exists (V3.0 Critical - Line 162 fix)
+            targets = getattr(self.persistence, 'targets', {})
             
-            text = UIManager.format_clones_hub(self.config.clones_data, status_map, p_targets)
+            text = UIManager.format_clones_hub(self.config.clones_data, status_map, targets)
             self._dashboard_msg = await update.message.reply_text(
                 text, 
                 reply_markup=UIManager.get_clones_hub_keyboard(self.config.clones_data), 
