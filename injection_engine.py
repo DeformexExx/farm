@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
-import sqlite3
-import os
 from bash_utils import run_bash
 
 logger = logging.getLogger("InjectionEngine")
@@ -29,46 +27,25 @@ class InjectionEngine:
             await run_bash(f"su -c 'am force-stop com.roblox.{clone_name}'")
             await asyncio.sleep(1)
 
-            # 2. SQLite Injection
-            await update_status(f"⏳ ({clone_name}) 2/4: Инъекция Cookie (Python)...")
-            db_path = f"/data/data/com.roblox.{clone_name}/app_webview/Default/Cookies"
-            local_db = f"/data/local/tmp/cookies_{clone_name}.db"
+            # 2. SQLite Injection (STRICT BASH)
+            await update_status(f"⏳ ({clone_name}) 2/4: Инъекция Cookie (BASH)...")
             
-            # 1. Копируем файл из системной директории
-            ret, stdout, stderr = await run_bash(f"su -c 'cp {db_path} {local_db}'")
+            sqlite_bin = "/data/data/com.termux/files/usr/bin/sqlite3"
+            db_path = f"/data/data/com.roblox.{clone_name}/app_webview/Default/Cookies"
+            
+            sql_del = "DELETE FROM cookies;"
+            sql_ins = (
+                f"INSERT INTO cookies (host_key, name, value, path, expires_utc, is_secure, is_httponly, has_expires, is_persistent, samesite, source_port) "
+                f"VALUES ('.roblox.com', '.ROBLOSECURITY', '{cookie}', '/', 253402300799000000, 1, 1, 1, 1, -1, -1);"
+            )
+            
+            # Form the full su command with escaped quotes for sqlite
+            inj_cmd = f"su -c \"{sqlite_bin} {db_path} \\\"{sql_del} {sql_ins}\\\"\""
+            ret, stdout, stderr = await run_bash(inj_cmd)
+            
             if ret != 0:
-                await update_status(f"❌ Ошибка копирования БД ({clone_name}):\n{stderr}")
+                await update_status(f"❌ SQLite Ошибка ({clone_name}):\n{stderr}")
                 return False
-
-            # 2. Даем полные права, чтобы Python (не root) мог писать в файл
-            await run_bash(f"su -c 'chmod 777 {local_db}'")
-
-            # 3. Модифицируем БД средствами Python sqlite3
-            try:
-                conn = sqlite3.connect(local_db)
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM cookies;")
-                cursor.execute(
-                    "INSERT INTO cookies (host_key, name, value, path, expires_utc, is_secure, is_httponly, has_expires, is_persistent, samesite, source_port) "
-                    "VALUES ('.roblox.com', '.ROBLOSECURITY', ?, '/', 253402300799000000, 1, 1, 1, 1, -1, -1);",
-                    (cookie,)
-                )
-                conn.commit()
-                conn.close()
-            except Exception as e:
-                await update_status(f"❌ Ошибка SQLite Python ({clone_name}):\n{e}")
-                # Удаляем временный файл через su на случай ошибки
-                await run_bash(f"su -c 'rm {local_db}'")
-                return False
-
-            # 4. Копируем обратно в системную директорию
-            ret, stdout, stderr = await run_bash(f"su -c 'cp {local_db} {db_path}'")
-            if ret != 0:
-                await update_status(f"❌ Ошибка возврата БД ({clone_name}):\n{stderr}")
-                return False
-                
-            # Удаляем временный файл
-            await run_bash(f"su -c 'rm {local_db}'")
 
             # 3. Permissions Fix (CRITICAL)
             await update_status(f"⏳ ({clone_name}) 3/4: Восстановление прав...")
