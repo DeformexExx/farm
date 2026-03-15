@@ -192,16 +192,18 @@ class AegisBot:
         self.persistence = PersistenceManager(FARM_DIR)
         self.application: Optional[Application] = None
         self._dash_msg   = None      # last dashboard message (for edit)
-        self._streamer: Optional[LogStreamer]      = None
-        self._log_handler: Optional[logging.Handler] = None
+        self._streamer   = None
+        self._log_handler = None
+        self._console_on: bool = self.persistence.console_mode
 
         # startup_times: {clone_name: timestamp} — watchdog skips for 300s
         self.startup_times: dict[str, float] = {}
 
-        # Restore active clones from persistence
-        targets = getattr(self.persistence, "targets", {})
-        if self.persistence.auto_restore and isinstance(targets, dict):
-            self.active_clones: set[str] = set(targets.keys())
+        # Auto-resume: restore active_clones from persistence
+        # Uses active_clones list (richer than targets dict)
+        if self.persistence.auto_restore:
+            saved = getattr(self.persistence, "active_clones", [])
+            self.active_clones: set[str] = set(saved) if saved else set(getattr(self.persistence, "targets", {}).keys())
         else:
             self.active_clones = set()
 
@@ -222,14 +224,14 @@ class AegisBot:
         )
 
     async def cmd_console(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Display last 10 lines of boot_log.txt in a code block."""
+        """Display last 15 lines of boot_log.txt in a code block."""
         if not await self._is_admin(update.effective_user.id):
             return
         try:
             if os.path.exists(BOOT_LOG):
                 with open(BOOT_LOG, "r", encoding="utf-8") as f:
                     lines = f.readlines()
-                tail = "".join(lines[-10:]).strip() or "(empty)"
+                tail = "".join(lines[-15:]).strip() or "(empty)"
             else:
                 tail = "(boot_log.txt not found)"
             await update.message.reply_text(f"```\n{tail}\n```", parse_mode="Markdown")
@@ -360,6 +362,25 @@ class AegisBot:
 
             elif d.startswith("stop_"):
                 await self._kill_clone(d[5:], chat)
+
+            elif d.startswith("clone_"):
+                # Per-clone sub-menu
+                name = d[6:]
+                st = await MonitorEngine.get_clone_status(name)
+                is_on = name in self.active_clones
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(f"⚡️ Relaunch {name}", callback_data=f"start_{name}"),
+                     InlineKeyboardButton(f"❄️ Stop {name}",     callback_data=f"stop_{name}")],
+                    [InlineKeyboardButton("🏠 Back to Hub", callback_data="nav_home")],
+                ])
+                is_active = "🟢" if "Online" in st or "Mem:" in st else "🌑"
+                await context.bot.send_message(
+                    chat,
+                    f"⚙️ *{name.upper()} Controls*\n{is_active} Status: `{st}`",
+                    reply_markup=kb,
+                    parse_mode="Markdown"
+                )
 
         except Exception as e:
             logger.error(f"Callback [{d}] error: {e}")
@@ -496,6 +517,21 @@ class AegisBot:
 
         # 5. Launch Watchdog with explicit application reference (fix NoneType)
         asyncio.create_task(watchdog_loop(app, self))
+
+        # 5b. Auto-resume: relaunch all saved active clones after 5s
+        if self.active_clones:
+            async def _auto_resume():
+                await asyncio.sleep(5)
+                admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
+                if admin_id:
+                    names = ", ".join(sorted(self.active_clones))
+                    try:
+                        await app.bot.send_message(admin_id, f"♻️ Auto-resume: запускаю `{names}`…", parse_mode="Markdown")
+                    except Exception:
+                        pass
+                for n in list(self.active_clones):
+                    await self._launch_clone(n, admin_id)
+            asyncio.create_task(_auto_resume())
 
         logger.info(f"💎 PROJECT AEGIS V{VERSION} ONLINE — {DEVICE_ID}")
 
