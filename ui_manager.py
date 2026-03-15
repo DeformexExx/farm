@@ -34,35 +34,28 @@ class UIManager:
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
-    def get_clones_keyboard(clones_data) -> InlineKeyboardMarkup:
-        """Clones Center Menu with Mass Controls"""
+    def get_clones_hub_keyboard(clones_data) -> InlineKeyboardMarkup:
+        """Sequential grid of controls for every clone card + Mass Controls"""
         keyboard = []
-        # Mass Controls
+        # Mass Controls Block
         keyboard.append([
             InlineKeyboardButton("⚡️ MASS START", callback_data="mass_start"),
             InlineKeyboardButton("❄️ MASS STOP", callback_data="mass_stop")
         ])
         
-        # Individual Clones
+        # Inline Controls per Clone Card
+        # Layout: [⚡️ Relaunch NAME] [❄️ Stop NAME]
         for clone in clones_data:
             name = clone.get("name", "Unknown")
-            keyboard.append([InlineKeyboardButton(f"🎮 {name.upper()}", callback_data=f"clone_menu_{name}")])
+            keyboard.append([
+                InlineKeyboardButton(f"⚡️ RE {name.upper()}", callback_data=f"start_{name}"),
+                InlineKeyboardButton(f"❄️ STOP {name.upper()}", callback_data=f"stop_{name}")
+            ])
             
-        keyboard.append([InlineKeyboardButton("🏠 BACK", callback_data="nav_home")])
+        keyboard.append([InlineKeyboardButton("🏠 BACK TO HOME", callback_data="nav_home")])
         return InlineKeyboardMarkup(keyboard)
 
-    @staticmethod
-    def get_single_clone_keyboard(name: str) -> InlineKeyboardMarkup:
-        """Dedicated row of buttons for one clone"""
-        keyboard = [
-            [
-                InlineKeyboardButton("▶️ START", callback_data=f"start_{name}"),
-                InlineKeyboardButton("⏹ STOP", callback_data=f"stop_{name}"),
-                InlineKeyboardButton("🧹 CLEAN", callback_data=f"clean_{name}")
-            ],
-            [InlineKeyboardButton("⬅️ BACK TO LIST", callback_data="nav_clones")]
-        ]
-        return InlineKeyboardMarkup(keyboard)
+
 
     @staticmethod
     def get_system_keyboard(console_on: bool, restore_on: bool) -> InlineKeyboardMarkup:
@@ -94,28 +87,42 @@ class UIManager:
         )
 
     @staticmethod
-    def format_clones_list(clones_data: list, status_map: dict) -> str:
-        """Clones Center Text with Threads - V2.1"""
-        msg = "🤖 *CLONE CENTER*\n━━━━━━━━━━━━━━━━━━\n"
+    def format_clones_hub(clones_data: list, status_map: dict, persistence_targets: list) -> str:
+        """High-density card blocks per clone - V3.0 Hub"""
+        msg = "💎 *CLONE MANAGEMENT HUB*\n\n"
+        
         for clone in clones_data:
             name = clone.get("name", "Unknown")
             raw_status = status_map.get(name, "Offline")
+            is_target = name in persistence_targets
             
+            # Status Indicator
             if "Offline" in raw_status:
-                indicator = "🌑 [OFF]"
-                detail = ""
-            elif "Error" in raw_status:
-                indicator = "⚠️ [ERR]"
-                detail = f"\n└─ _{raw_status}_"
+                indicator = "🌑 OFFLINE"
+                thr_count = "N/A"
+            elif "Error" in raw_status or "ERR" in raw_status:
+                indicator = "⚠️ FAILED"
+                thr_count = "N/A"
             else:
-                indicator = "💠 [ON]"
-                # raw_status might be 'Mem: 450MB | Thr: 165'
-                detail = f"\n└─ _{raw_status}_"
-                
-            msg += f"{indicator} `{name.upper()}`{detail}\n"
+                indicator = "🟢 ONLINE"
+                # Extraction logic for Thr: count
+                import re
+                thr_match = re.search(r"Thr:\s*(\d+)", raw_status)
+                thr_count = thr_match.group(1) if thr_match else "?"
+
+            # State Label
+            state_label = "👤 ON (Synced)" if is_target else "🌑 OFF"
+            
+            msg += "━━━━━━━━━━━━━━━━━━\n\n"
+            msg += f"[🎮 *{name.upper()}*]\n"
+            msg += f"STATUS: {indicator}\n"
+            msg += f"STATE: {state_label}\n"
+            msg += f"WATCHDOG: 🧵 Threads: {thr_count}\n\n"
                 
         msg += "━━━━━━━━━━━━━━━━━━"
         return msg
+
+
 
     @staticmethod
     def get_help_page(page: int) -> str:

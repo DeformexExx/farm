@@ -155,8 +155,13 @@ class AegisNebulaBot:
             name = clone.get("name")
             if name:
                 status_map[name] = await MonitorEngine.get_clone_status(name)
-        text = UIManager.format_clones_list(self.config.clones_data, status_map)
-        self._dashboard_msg = await update.message.reply_text(text, reply_markup=UIManager.get_clones_keyboard(self.config.clones_data), parse_mode='Markdown')
+        
+        text = UIManager.format_clones_hub(self.config.clones_data, status_map, self.persistence.targets)
+        self._dashboard_msg = await update.message.reply_text(
+            text, 
+            reply_markup=UIManager.get_clones_hub_keyboard(self.config.clones_data), 
+            parse_mode='Markdown'
+        )
 
     async def send_system_menu(self, update: Update):
         text = "⚙️ *SYSTEM SETTINGS*"
@@ -196,7 +201,7 @@ class AegisNebulaBot:
 
 
     async def update_dashboard(self):
-        """Updates the last sent clones menu if it exists."""
+        """Updates the last sent clones menu if it exists - V3.0"""
         if not self._dashboard_msg:
             return
             
@@ -206,8 +211,8 @@ class AegisNebulaBot:
             if name:
                 status_map[name] = await MonitorEngine.get_clone_status(name)
         
-        text = UIManager.format_clones_list(self.config.clones_data, status_map)
-        keyboard = UIManager.get_clones_keyboard(self.config.clones_data)
+        text = UIManager.format_clones_hub(self.config.clones_data, status_map, self.persistence.targets)
+        keyboard = UIManager.get_clones_hub_keyboard(self.config.clones_data)
         
         try:
             await self._dashboard_msg.edit_text(text, reply_markup=keyboard, parse_mode='Markdown')
@@ -298,9 +303,7 @@ class AegisNebulaBot:
                         await asyncio.sleep(1)
                 await context.bot.send_message(chat_id=query.message.chat_id, text="✅ Массовая остановка завершена!")
 
-            elif data.startswith("clone_menu_"):
-                name = data.replace("clone_menu_", "")
-                await query.edit_message_text(f"🎮 *Управление клоном:* `{name.upper()}`", reply_markup=UIManager.get_single_clone_keyboard(name), parse_mode='Markdown')
+            # Removed individual clone menu in V3.0
             
             elif data.startswith("start_"):
                 clone_name = data.replace("start_", "")
