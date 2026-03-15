@@ -17,57 +17,48 @@ class UIManager:
     @staticmethod
     def get_main_keyboard() -> ReplyKeyboardMarkup:
         """Dashboard Main Menu"""
-        keyboard = [
+        return ReplyKeyboardMarkup([
             [KeyboardButton("📱 DEVICE"), KeyboardButton("🤖 CLONES")],
             [KeyboardButton("⚙️ SYSTEM")]
-        ]
-        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        ], resize_keyboard=True)
 
     @staticmethod
     def get_device_keyboard() -> InlineKeyboardMarkup:
         """Device Management Menu"""
-        keyboard = [
+        return InlineKeyboardMarkup([
             [InlineKeyboardButton("♻️ GLOBAL SYNC", callback_data="sys_sync")],
             [InlineKeyboardButton("❄️ DROP CACHES", callback_data="sys_drop_caches")],
             [InlineKeyboardButton("🏠 BACK", callback_data="nav_home")]
-        ]
-        return InlineKeyboardMarkup(keyboard)
+        ])
 
     @staticmethod
     def get_clones_hub_keyboard(clones_data) -> InlineKeyboardMarkup:
-        """Industrial High-Density Controls - V3.0 Hub"""
+        """Industrial Card Controls - V3.0 Hub"""
         keyboard = []
-        # Mass Controls Block
         keyboard.append([
             InlineKeyboardButton("⚡️ MASS START", callback_data="mass_start"),
             InlineKeyboardButton("❄️ MASS STOP", callback_data="mass_stop")
         ])
-        
-        # Inline Controls per Clone Card
-        # Strictly [⚡️ RE] and [❄️ STOP] to save space
         for clone in clones_data:
             name = clone.get("name", "Unknown")
             keyboard.append([
                 InlineKeyboardButton(f"⚡️ RE {name.upper()}", callback_data=f"start_{name}"),
                 InlineKeyboardButton(f"❄️ STOP {name.upper()}", callback_data=f"stop_{name}")
             ])
-            
         keyboard.append([InlineKeyboardButton("🏠 BACK TO HOME", callback_data="nav_home")])
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
     def get_system_keyboard(console_on: bool, restore_on: bool) -> InlineKeyboardMarkup:
         """System Tools Menu"""
-        con_status = "🟢 ON" if console_on else "🔴 OFF"
-        res_status = "🟢 ON" if restore_on else "🔴 OFF"
-        
-        keyboard = [
-            [InlineKeyboardButton(f"📟 CONSOLE: {con_status}", callback_data="toggle_console")],
-            [InlineKeyboardButton(f"🔄 AUTO-RESTORE: {res_status}", callback_data="toggle_restore")],
+        c_st = "🟢 ON" if console_on else "🔴 OFF"
+        r_st = "🟢 ON" if restore_on else "🔴 OFF"
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"📟 CONSOLE: {c_st}", callback_data="toggle_console")],
+            [InlineKeyboardButton(f"🔄 AUTO-RESTORE: {r_st}", callback_data="toggle_restore")],
             [InlineKeyboardButton("🖼 SCREENSHOT", callback_data="sys_screenshot"), InlineKeyboardButton("❓ HELP", callback_data="sys_help")],
             [InlineKeyboardButton("🏠 BACK", callback_data="nav_home")]
-        ]
-        return InlineKeyboardMarkup(keyboard)
+        ])
 
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
@@ -85,59 +76,36 @@ class UIManager:
         )
 
     @staticmethod
-    def format_clones_hub(clones_data: list, status_map: dict, persistence_targets: dict) -> str:
-        """Industrial High-Density Card Blocks - V3.0 Hub"""
-        msg = "💎 *CLONE MANAGEMENT HUB V3.0*\n\n"
+    def format_clones_hub(clones_data: list, status_map: dict, targets: dict) -> str:
+        """V3.0 Card UI: Threads + Real-time Status"""
+        msg = "💎 *CLONE HUB v3.0* 💎\n"
         msg += "━━━━━━━━━━━━━━━━━━\n"
-        
         for clone in clones_data:
             name = clone.get("name", "Unknown")
-            raw_status = status_map.get(name, "Offline")
-            # Safe check for dictionary keys
-            is_target = name in persistence_targets if isinstance(persistence_targets, dict) else name in persistence_targets
+            st = status_map.get(name, "Offline")
+            is_sync = name in targets
             
-            # Status Indicator
-            if "Offline" in raw_status:
-                indicator = "🌑 OFFLINE"
-                thr_count = "N/A"
-            elif "Error" in raw_status or "ERR" in raw_status:
-                indicator = "⚠️ FAILED"
-                thr_count = "N/A"
+            # Icon logic
+            if "Offline" in st: ico, thr = "🌑 OFFLINE", "N/A"
+            elif "ERR" in st or "Error" in st: ico, thr = "⚠️ FAILED", "N/A"
             else:
-                indicator = "🟢 ONLINE"
-                # Extraction logic for Thr: count
+                ico = "🟢 ONLINE"
                 import re
-                thr_match = re.search(r"Thr:\s*(\d+)", raw_status)
-                thr_count = thr_match.group(1) if thr_match else "?"
-
-            # State Label
-            state_label = "👤 ON (Synced)" if is_target else "🌑 OFF"
+                m = re.search(r"Thr:\s*(\d+)", st)
+                thr = m.group(1) if m else "?"
             
+            state = "👤 ON (Synced)" if is_sync else "🌑 OFF"
             msg += f"[🎮 *{name.upper()}*]\n"
-            msg += f"STATUS: {indicator}\n"
-            msg += f"STATE: {state_label}\n"
-            msg += f"WATCHDOG: 🧵 Threads: {thr_count}\n"
+            msg += f"STATUS: {ico}\n"
+            msg += f"STATE: {state}\n"
+            msg += f"WATCHDOG: 🧵 Threads: {thr}\n"
             msg += "━━━━━━━━━━━━━━━━━━\n"
-                
         return msg
 
     @staticmethod
-    def get_help_page(page: int) -> str:
-        pages = {
-            1: "🎮 *COMMANDS*\n\n• /start - Open Dashboard\n• /console - Toggle Stream\n• /help - This Menu",
-            2: "⚙️ *STRUCTURE*\n\nBot uses `/farm` directory.\nConfigs: `{DEVICE}.json`.\nGlobal: `servers.json`.",
-            3: "🛠 *TROUBLESHOOTING*\n\n• No Root? Injection will fail.\n• Conflicts? Bot self-kills if multiple instances run."
-        }
-        return pages.get(page, "Help page not found.")
-
-    @staticmethod
-    def get_help_keyboard(current_page: int) -> InlineKeyboardMarkup:
-        buttons = []
-        if current_page > 1:
-            buttons.append(InlineKeyboardButton("⬅️", callback_data=f"help_page_{current_page-1}"))
-        if current_page < 3:
-            buttons.append(InlineKeyboardButton("➡️", callback_data=f"help_page_{current_page+1}"))
-        
-        keyboard = [buttons] if buttons else []
-        keyboard.append([InlineKeyboardButton("🏠 BACK", callback_data="nav_home")])
-        return InlineKeyboardMarkup(keyboard)
+    def get_help_page() -> str:
+        return ("🎮 *V3.0 INDUSTRIAL GUIDE*\n\n"
+                "• /start - Главная панель\n"
+                "• /console - Потоковые логи\n"
+                "• Watchdog: Рестарт при < 130 потоков.\n"
+                "• Single Master: Авто-убийство дубликатов.")

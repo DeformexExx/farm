@@ -8,15 +8,15 @@ logger = logging.getLogger("PersistenceManager")
 class PersistenceManager:
     def __init__(self, farm_dir: str):
         self.path = os.path.join(farm_dir, "persistence.json")
-        self.targets = {} # EXPLICIT V3.0 DICT
+        self.targets = {} # V3.0 ATOMIC FIX: INITIALIZED AS DICT
         self.auto_restore = True
         self.console_mode = False
         
-        # Default Template
+        # Internal template
         self.data = {
             "auto_restore": True,
             "console_mode": False,
-            "target_clones": [], # Legacy List
+            "target_clones": [], # Legacy List Support
             "targets": {} # V3.0 Dict
         }
         self.load()
@@ -28,11 +28,11 @@ class PersistenceManager:
                     loaded_data = json.load(f)
                     self.data.update(loaded_data)
                     
-                    # Core Attributes Sync
+                    # Core Sync
                     self.auto_restore = self.data.get("auto_restore", True)
                     self.console_mode = self.data.get("console_mode", False)
                     
-                    # Targets Migration/Sync
+                    # Migration: convert legacy list to dict if needed
                     raw_targets = self.data.get("targets", self.data.get("target_clones", []))
                     if isinstance(raw_targets, list):
                         self.targets = {name: True for name in raw_targets}
