@@ -101,29 +101,55 @@ class LogStreamer:
 # ═══════════════════════════════════════════════════════════════════════════
 async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     """
-    Runs forever. Checks thread count every 60s.
-    Uses application.bot for messaging — no NoneType risk.
-    Cool-down dict prevents restart loops (60s per clone).
+    Runs forever. Checks every 60s.
+    Uses application.bot — no NoneType risk.
+
+    Anti-restart-loop rules:
+      1. GRACE PERIOD: Skip any clone started within the last 300s.
+      2. 3-STRIKE OFFLINE: Only restart after 3 consecutive Offline checks.
+      3. TIMED COOLDOWN:   After a restart, ignore the clone for 300s.
     """
-    cooldown: dict[str, float] = {}  # {clone_name: last_restart_timestamp}
+    import re
+
+    # {clone_name: timestamp_of_last_restart}
+    last_restart: dict[str, float] = {}
+    # {clone_name: consecutive_offline_count}
+    offline_strikes: dict[str, int] = {}
 
     while True:
         await asyncio.sleep(60)
         try:
+            now = time.time()
+
             for name in list(bot_instance.active_clones):
-                # Cool-down check
-                last = cooldown.get(name, 0)
-                if time.time() - last < 60:
+
+                # ── 1. STARTUP GRACE PERIOD (300s) ──────────────────────────
+                last_start = bot_instance.startup_times.get(name, 0)
+                if now - last_start < 300:
+                    logger.info(f"Watchdog: [{name}] in grace period ({int(300 - (now - last_start))}s left). Skip.")
+                    offline_strikes[name] = 0  # reset strikes during grace
                     continue
 
+                # ── 2. POST-RESTART COOLDOWN (300s) ─────────────────────────
+                last_rst = last_restart.get(name, 0)
+                if now - last_rst < 300:
+                    continue
+
+                # ── 3. STATUS CHECK ──────────────────────────────────────────
                 st = await MonitorEngine.get_clone_status(name)
                 needs_restart = False
+                reason = ""
 
                 if "Offline" in st:
-                    reason = "Offline"
-                    needs_restart = True
-                elif "Thr:" in st:
-                    import re
+                    offline_strikes[name] = offline_strikes.get(name, 0) + 1
+                    if offline_strikes[name] >= 3:
+                        reason = f"Offline x{offline_strikes[name]}"
+                        needs_restart = True
+                    else:
+                        logger.info(f"Watchdog: [{name}] Offline strike {offline_strikes[name]}/3. Waiting…")
+                else:
+                    # Reset strike counter when online
+                    offline_strikes[name] = 0
                     m = re.search(r"Thr:\s*(\d+)", st)
                     if m:
                         thr = int(m.group(1))
@@ -134,8 +160,10 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                             reason = f"Leaking (Thr:{thr})"
                             needs_restart = True
 
+                # ── 4. RESTART ───────────────────────────────────────────────
                 if needs_restart:
-                    cooldown[name] = time.time()
+                    last_restart[name] = now
+                    offline_strikes[name] = 0
                     logger.warning(f"Watchdog: [{name}] {reason}. Restarting…")
                     admin_id = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
                     if admin_id:
@@ -166,6 +194,9 @@ class AegisBot:
         self._dash_msg   = None      # last dashboard message (for edit)
         self._streamer: Optional[LogStreamer]      = None
         self._log_handler: Optional[logging.Handler] = None
+
+        # startup_times: {clone_name: timestamp} — watchdog skips for 300s
+        self.startup_times: dict[str, float] = {}
 
         # Restore active clones from persistence
         targets = getattr(self.persistence, "targets", {})
@@ -358,6 +389,9 @@ class AegisBot:
         await asyncio.sleep(10)
         urls = self.config.servers_list
         await InjectionEngine.inject_and_launch(name, ci.get("cookie"), urls[0] if urls else None, sm)
+        # ── STARTUP GRACE: Watchdog ignores this clone for 300s ─────────
+        self.startup_times[name] = time.time()
+        logger.info(f"_launch_clone: [{name}] grace period started (300s).")
         await self.refresh_dashboard()
 
     async def _kill_clone(self, name: Optional[str], chat_id: Optional[int]):
