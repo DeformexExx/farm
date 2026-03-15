@@ -176,55 +176,70 @@ class AegisNebulaBot:
         data = query.data
         await query.answer()
 
-        if data.startswith("start_"):
-            clone_name = data.replace("start_", "")
-            clone_info = self.config.get_clone(clone_name)
-            
-            if not clone_info or not clone_info.get("cookie"):
-                await context.bot.send_message(chat_id=query.message.chat_id, text=f"❌ Ошибка: Конфиг/Cookie для {clone_name} не найден.")
-                return
+        try:
+            if data.startswith("start_"):
+                clone_name = data.replace("start_", "")
+                clone_info = self.config.get_clone(clone_name)
+                
+                if not clone_info or not clone_info.get("cookie"):
+                    await context.bot.send_message(chat_id=query.message.chat_id, text=f"❌ Ошибка: Конфиг/Cookie для {clone_name} не найден.")
+                    return
 
-            # Index based distribution logic
-            clones_list = [c.get("name") for c in self.config.clones_data]
-            try:
-                idx = clones_list.index(clone_name)
-            except ValueError:
-                idx = 0
-            
-            # Universal Link Distribution
-            servers_list = self.config.servers_list
-            if servers_list:
+                # Index based distribution logic
+                clones_list = [c.get("name") for c in self.config.clones_data]
                 try:
-                    server_url = servers_list[idx]
-                except IndexError:
-                    server_url = servers_list[0]
-            else:
-                server_url = clone_info.get("placeId") # Use individual if no list
+                    idx = clones_list.index(clone_name)
+                except ValueError:
+                    idx = 0
+                
+                # Universal Link Distribution
+                servers_list = self.config.servers_list
+                if not servers_list:
+                    await context.bot.send_message(chat_id=query.message.chat_id, text="⚠️ Ошибка: servers.json пуст!")
+                    return
 
-            self.active_clones.add(clone_name)
-            
-            # Create a temporary status message for injection logs
-            status_msg = await context.bot.send_message(
-                chat_id=query.message.chat_id, 
-                text=f"🎮 Запуск {clone_name} на сервер №{idx+1}..."
-            )
-            
-            # Start Injection
-            asyncio.create_task(self._run_injection(clone_name, clone_info, server_url, status_msg))
+                # Safely get URL by index, fallback to index 0
+                url = servers_list[idx] if idx < len(servers_list) else servers_list[0]
+                
+                # Safe Extraction (Regex)
+                import re
+                match = re.search(r"code=([a-zA-Z0-9]+)", str(url))
+                if not match:
+                    await context.bot.send_message(chat_id=query.message.chat_id, text=f"⚠️ Ошибка: Не удалось найти 'code=' в ссылке {url}")
+                    return
+                
+                share_code = match.group(1)
+                await context.bot.send_message(chat_id=query.message.chat_id, text=f"🔍 Ссылка обработана, код: {share_code}. Начинаю запуск...")
 
-        elif data.startswith("stop_"):
-            clone_name = data.replace("stop_", "")
-            self.active_clones.discard(clone_name)
-            await InjectionEngine.stop(clone_name)
-            await context.bot.send_message(chat_id=query.message.chat_id, text=f"✅ {clone_name} остановлен.")
-            await self.update_dashboard()
+                self.active_clones.add(clone_name)
+                
+                # Create a temporary status message for injection logs
+                status_msg = await context.bot.send_message(
+                    chat_id=query.message.chat_id, 
+                    text=f"🎮 Запуск {clone_name} на сервер №{idx+1}..."
+                )
+                
+                # Start Injection
+                asyncio.create_task(self._run_injection(clone_name, clone_info, url, status_msg))
 
-        elif data.startswith("clean_"):
-            clone_name = data.replace("clean_", "")
-            self.active_clones.discard(clone_name)
-            await InjectionEngine.clean(clone_name)
-            await context.bot.send_message(chat_id=query.message.chat_id, text=f"✅ Кэш {clone_name} очищен.")
-            await self.update_dashboard()
+            elif data.startswith("stop_"):
+                clone_name = data.replace("stop_", "")
+                self.active_clones.discard(clone_name)
+                await InjectionEngine.stop(clone_name)
+                await context.bot.send_message(chat_id=query.message.chat_id, text=f"✅ {clone_name} остановлен.")
+                await self.update_dashboard()
+
+            elif data.startswith("clean_"):
+                clone_name = data.replace("clean_", "")
+                self.active_clones.discard(clone_name)
+                await InjectionEngine.clean(clone_name)
+                await context.bot.send_message(chat_id=query.message.chat_id, text=f"✅ Кэш {clone_name} очищен.")
+                await self.update_dashboard()
+                
+        except Exception as e:
+            logger.error(f"Callback Exception: {e}", exc_info=True)
+            await context.bot.send_message(chat_id=query.message.chat_id, text=f"❌ КРИТИЧЕСКАЯ ОШИБКА PYTHON: {e}")
+
 
     async def _run_injection(self, clone_name, clone_info, server_url, status_msg):
         success = await InjectionEngine.inject_and_launch(

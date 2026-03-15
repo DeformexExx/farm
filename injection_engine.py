@@ -73,7 +73,10 @@ class InjectionEngine:
             # 4. Launch (Monkey / Intent) (Golden Sequence)
             await update_status(f"⏳ ({clone_name}) 4/4: Запуск (Awaken)...")
             
-            # Step A: Start the app (Awaken)
+            # Step 1: Force Stop (already done at step 1, but user requested it again in sequence)
+            # await run_bash(f"su -c 'am force-stop com.roblox.{clone_name}'")
+            
+            # Step 3: Start the app (Awaken)
             ret, stdout, stderr = await run_bash(f"su -c 'monkey -p com.roblox.{clone_name} 1'")
             
             if ret != 0:
@@ -81,43 +84,33 @@ class InjectionEngine:
                 return False
 
             if place_id:
-                # Step B: Wait for the app to wake up (GOLDEN 10S FOR UGPHONE)
-                await asyncio.sleep(10)
+                # Step 4: WAIT 6 SECONDS (ugPhone needs time)
+                await asyncio.sleep(6)
                 
-                # Step C: Send the Join Intent (STRIKE - Universal Intent)
+                # Step 5: Send the Join command (Strike)
                 import re
                 share_code = None
                 
-                # Try simple split extraction as requested
-                if "code=" in str(place_id):
-                    try:
-                        share_code = str(place_id).split("code=")[1].split("&")[0]
-                    except Exception:
-                        pass
-                
-                # Regex fallback
-                if not share_code:
-                    match = re.search(r"code=([a-zA-Z0-9]+)", str(place_id))
-                    if match:
-                        share_code = match.group(1)
+                # Safe Extraction (Regex)
+                match = re.search(r"code=([a-zA-Z0-9]+)", str(place_id))
+                if match:
+                    share_code = match.group(1)
                 
                 if share_code:
-                    # Universal Intent Format
-                    join_intent = f"https://www.roblox.com/games/start?code={share_code}&type=Server"
-                    join_cmd = f"su -c 'am start -a android.intent.action.VIEW -d \"{join_intent}\" com.roblox.{clone_name}'"
+                    # Universal Intent Format (roblox://)
+                    join_intent = f"roblox://navigation/share_links?code={share_code}&type=Server"
+                    join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"{join_intent}\" com.roblox.{clone_name}'"
                     ret, stdout, stderr = await run_bash(join_cmd)
                     if ret != 0:
                         logger.error(f"Join Intent fail for {clone_name}: {stderr}")
                 else:
-                    # Fallback to standard PlaceID Intent or direct URL
+                    # Fallback to standard PlaceID or direct URL
                     if str(place_id).isdigit():
-                        join_cmd = f"su -c 'am start -a android.intent.action.VIEW -d \"roblox://placeId={place_id}\" com.roblox.{clone_name}'"
+                        join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"roblox://placeId={place_id}\" com.roblox.{clone_name}'"
                     else:
-                        join_cmd = f"su -c 'am start -a android.intent.action.VIEW -d \"{place_id}\" com.roblox.{clone_name}'"
+                        join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"{place_id}\" com.roblox.{clone_name}'"
                     
                     ret, stdout, stderr = await run_bash(join_cmd)
-                    if ret != 0:
-                        logger.error(f"Fallback Intent fail for {clone_name}: {stderr}")
                 
             await update_status(f"✅ Запущено ({clone_name})")
             return True
