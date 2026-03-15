@@ -1,5 +1,5 @@
 #!/bin/bash
-# AEGIS OVERLORD v15 - ULTIMATE FLEET CONTROL INSTALLER
+# AEGIS OVERLORD v17 - ULTIMATE FLEET CONTROL INSTALLER
 # ./setup.sh DEV_2
 
 if [ -z "$1" ]; then
@@ -12,7 +12,7 @@ BOOT_DIR="$HOME/.termux/boot"
 BOOT_SCRIPT="$BOOT_DIR/aegis_start.sh"
 
 echo "------------------------------------------------"
-echo "🚀 Установка Aegis Overlord v15: Ultimate Fleet Control [$DEVICE_ID]"
+echo "🚀 Установка Aegis Overlord v17: Ultimate Fleet Control [$DEVICE_ID]"
 echo "------------------------------------------------"
 
 # 1. Системные пакеты (TSU + SQLITE)
@@ -22,7 +22,7 @@ pkg install python git tsu sqlite ntpdate -y
 
 # 2. Python зависимости
 echo "🐍 [2/4] Установка Python библиотек..."
-pip install requests python-telegram-bot psutil
+pip install requests "python-telegram-bot>=20.0" psutil
 
 # 3. Настройка автозапуска
 echo "🔌 [3/4] Настройка автозапуска (Termux:Boot)..."
@@ -30,7 +30,7 @@ mkdir -p "$BOOT_DIR"
 
 cat <<EOF > "$BOOT_SCRIPT"
 #!/bin/bash
-# Aegis Overlord Boot v15
+# Aegis Overlord Boot v17
 termux-wake-lock
 ntpdate -u pool.ntp.org || true
 
@@ -46,7 +46,9 @@ chmod +x "$BOOT_SCRIPT"
 # 4. Финализация
 echo "✅ [4/4] Финализация (Farm directory)..."
 if [ ! -d "$HOME/farm" ]; then
-    git clone https://github.com/DeformexExx/farm.git ~/farm
+    echo "🔗 Введите URL вашего приватного Git репозитория (FarmOS):"
+    read -rp "> " GIT_REPO
+    git clone "$GIT_REPO" ~/farm
 fi
 
 echo "------------------------------------------------"

@@ -28,15 +28,16 @@ logging.basicConfig(
     level=logging.INFO,
     format=f'%(asctime)s [{DEVICE_ID}] [%(levelname)s] %(message)s'
 )
-logger = logging.getLogger("AegisV15")
+logger = logging.getLogger("AegisV17")
 
-class AegisOverlordV15:
+class AegisOverlordV17:
     def __init__(self):
         self.device_id = DEVICE_ID
         self.bot_token = ""
         self.admin_ids = []
         self.clones_data = []
         self.servers = []
+        self.application = None
         
         self._load_local_config()
         self._load_clones_json()
@@ -78,15 +79,15 @@ class AegisOverlordV15:
 
     def get_main_keyboard(self):
         keyboard = [
-            [KeyboardButton("📊 Статус фермы"), KeyboardButton("🔄 Синхронизация с Git")],
-            [KeyboardButton("🖼 Скриншот"), KeyboardButton("🛑 Стоп ВСЕ")]
+            [KeyboardButton("📊 Мониторинг"), KeyboardButton("🔄 Git Sync")],
+            [KeyboardButton("🖼 Скриншот"), KeyboardButton("🛑 СТОП ВСЕ")]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_user.id not in self.admin_ids: return
         await update.message.reply_text(
-            f"👑 *AEGIS OVERLORD v15: ULTIMATE FLEET CONTROL*\nУстройство: `{self.device_id}`",
+            f"👑 *AEGIS OVERLORD v17: ULTIMATE FLEET CONTROL*\nУстройство: `{self.device_id}`",
             reply_markup=self.get_main_keyboard(),
             parse_mode='Markdown'
         )
@@ -95,16 +96,16 @@ class AegisOverlordV15:
         if update.effective_user.id not in self.admin_ids: return
         text = update.message.text
 
-        if text == "📊 Статус фермы":
+        if text == "📊 Мониторинг":
             await self.send_status_report(update)
             
-        elif text == "🔄 Синхронизация с Git":
+        elif text == "🔄 Git Sync":
             await self.sync_git(update)
 
         elif text == "🖼 Скриншот":
             await self.take_screenshot(update.message)
 
-        elif text == "🛑 Стоп ВСЕ":
+        elif text == "🛑 СТОП ВСЕ":
             await self.stop_all(update)
 
     async def get_system_stats(self):
@@ -137,16 +138,37 @@ class AegisOverlordV15:
         self._load_clones_json()
         ram, cpu, temp = await self.get_system_stats()
         
-        msg = f"📱 Device: `{self.device_id}`\n🧠 RAM: {ram} | 🚀 CPU: {cpu} | 🌡 Temp: {temp}"
+        msg = f"📱 Device: `{self.device_id}`\n🧠 RAM: {ram} | 🚀 CPU: {cpu} | 🌡 Temp: {temp}\n\n"
         
         keyboard = []
         for clone in self.clones_data:
             name = clone.get("name", "Unknown")
-            # 3 buttons per row natively per user request
+            
+            # Fetch active process stats
+            ret, stdout_pid, _ = await self.run_bash(f"su -c 'pidof com.roblox.{name}'")
+            if ret == 0 and stdout_pid.strip():
+                try:
+                    # Get RSS memory and Threads using ps/grep or /proc parsing via su
+                    cmd_stats = f"su -c 'cat /proc/{stdout_pid.strip()}/status | grep -E \"(VmRSS|Threads)\"'"
+                    ret_st, stdout_st, _ = await self.run_bash(cmd_stats)
+                    threads, mem = "?", "?"
+                    if ret_st == 0:
+                        for line in stdout_st.split('\n'):
+                            if line.startswith('VmRSS'):
+                                val = line.split()[1]
+                                mem = f"{int(val)//1024}MB"
+                            elif line.startswith('Threads'):
+                                threads = line.split()[1]
+                    msg += f"🟢 `{name}` | Mem: {mem} | Thr: {threads}\n"
+                except:
+                    msg += f"🟢 `{name}` | Stats err\n"
+            else:
+                msg += f"🔴 `{name}` | Offline\n"
+            
             row = [
-                InlineKeyboardButton(f"▶️ Start {name}", callback_data=f"start_clone_{name}"),
-                InlineKeyboardButton(f"⏹ Stop {name}", callback_data=f"stop_clone_{name}"),
-                InlineKeyboardButton(f"🧹 Clean {name}", callback_data=f"clear_cache_{name}")
+                InlineKeyboardButton(f"▶️ Старт {name}", callback_data=f"start_clone_{name}"),
+                InlineKeyboardButton(f"⏹ Стоп {name}", callback_data=f"stop_clone_{name}"),
+                InlineKeyboardButton(f"🧹 Очистка", callback_data=f"clear_cache_{name}")
             ]
             keyboard.append(row)
 
@@ -160,7 +182,7 @@ class AegisOverlordV15:
         self._load_clones_json()
         
         if ret == 0:
-            await msg.edit_text("✅ Конфиги успешно загружены с GitHub. Нажмите [📊 Статус фермы] для обновления меню.")
+            await msg.edit_text("✅ Конфиги загружены. Нажмите [📊 Мониторинг] для обновления меню.")
         else:
             await msg.edit_text(f"❌ Ошибка Git:\n{stderr}")
 
@@ -217,7 +239,7 @@ class AegisOverlordV15:
 
     async def holy_grail_injection(self, chat_id, bot, clone_name, cookie, place_id=None):
         """The strictly ordered, pure-bash injection mechanism."""
-        status_msg = await bot.send_message(chat_id=chat_id, text=f"⏳ Holy Grail Injection: `{clone_name}`...", parse_mode='Markdown')
+        status_msg = await bot.send_message(chat_id=chat_id, text=f"⏳ Инъекция...", parse_mode='Markdown')
         
         try:
             # 1. Force Stop
@@ -228,7 +250,7 @@ class AegisOverlordV15:
             db_path = f"/data/data/com.roblox.{clone_name}/app_webview/Default/Cookies"
             
             # The exact SQL specified
-            sql_del = "DELETE FROM cookies WHERE host_key LIKE '%roblox.com%';"
+            sql_del = "DELETE FROM cookies;"
             sql_ins = f"INSERT INTO cookies (host_key, name, value, path, expires_utc, is_secure, is_httponly, has_expires, is_persistent, samesite, source_port) VALUES ('.roblox.com', '.ROBLOSECURITY', '{cookie}', '/', 253402300799000000, 1, 1, 1, 1, -1, -1);"
             
             inj_cmd = f"su -c \"sqlite3 {db_path} \\\"{sql_del} {sql_ins}\\\"\""
@@ -239,7 +261,7 @@ class AegisOverlordV15:
                 return
 
             # 3. Permissions Fix (CRITICAL)
-            chown_cmd = f"su -c \"chown \\$(stat -c %u:%g /data/data/com.roblox.{clone_name}) /data/data/com.roblox.{clone_name}/app_webview/Default/Cookies\""
+            chown_cmd = f"su -c \"chown \\$(stat -c %u:%g /data/data/com.roblox.{clone_name}) {db_path}\""
             ret, stdout, stderr = await self.run_bash(chown_cmd)
             
             if ret != 0:
@@ -250,23 +272,14 @@ class AegisOverlordV15:
                 return
 
             # 4. Launch (Monkey / Intent)
-            await self.run_bash(f"su -c 'monkey -p com.roblox.{clone_name} -c android.intent.category.LAUNCHER 1'")
-            
             # 5. Server Entry Logic
-            if self.servers:
-                import random
-                server_url = random.choice(self.servers)
-                await asyncio.sleep(8) # Wait for initial app load (increased slightly for stability)
-                join_cmd = f"su -c 'am start -a android.intent.action.VIEW -d \"{server_url}\" com.roblox.{clone_name}'"
-                await self.run_bash(join_cmd)
-                await status_msg.edit_text(f"✅ `{clone_name}` подключен к серверу из пула (servers.json).", parse_mode='Markdown')
-            elif place_id:
-                await asyncio.sleep(8) # Wait for initial app load
+            if place_id:
                 join_cmd = f"su -c 'am start -a android.intent.action.VIEW -d \"roblox://placeId={place_id}\" com.roblox.{clone_name}'"
                 await self.run_bash(join_cmd)
-                await status_msg.edit_text(f"✅ `{clone_name}` подключен к серверу (PlaceId: {place_id}).", parse_mode='Markdown')
             else:
-                await status_msg.edit_text(f"✅ `{clone_name}` запущен (Главное меню).", parse_mode='Markdown')
+                await self.run_bash(f"su -c 'monkey -p com.roblox.{clone_name} -c android.intent.category.LAUNCHER 1'")
+                
+            await status_msg.edit_text(f"✅ Запущено")
         except Exception as e:
             logger.error(f"Launch Sequence Error for {clone_name}: {e}")
             await status_msg.edit_text(f"❌ Критическая ошибка ({clone_name}): {e}")
@@ -274,7 +287,7 @@ class AegisOverlordV15:
     async def watchdog_task(self):
         """Monitors clones in 'Enabled' state. If process is dead, auto-restart."""
         while True:
-            await asyncio.sleep(120)  # Wait 2 minutes
+            await asyncio.sleep(60)  # Wait 1 minute
             try:
                 self._load_clones_json()
                 for clone in self.clones_data:
@@ -287,7 +300,7 @@ class AegisOverlordV15:
                         ret, stdout, _ = await self.run_bash(f"su -c 'pidof com.roblox.{name}'")
                         
                         # Process is dead
-                        if ret != 0 or not stdout.strip():
+                        if ret != 0 or not stdout_pid.strip():
                             logger.warning(f"Watchdog: {name} is DEAD. Auto-restarting...")
                             
                             # Grab cookie and placeId
@@ -329,8 +342,8 @@ class AegisOverlordV15:
         loop = asyncio.get_event_loop()
         loop.create_task(self.watchdog_task())
         
-        logger.info(f"Aegis Overlord v15: Ultimate Fleet Control started for {self.device_id}")
+        logger.info(f"Aegis Overlord v17: Ultimate Fleet Control started for {self.device_id}")
         self.application.run_polling()
 
 if __name__ == "__main__":
-    AegisOverlordV15().run()
+    AegisOverlordV17().run()
