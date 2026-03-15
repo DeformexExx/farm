@@ -59,7 +59,6 @@ class CloneState(str, enum.Enum):
     STOPPED  = "STOPPED"   # Not running
     STARTING = "STARTING"  # 1/4 - 4/4 + 300s grace window
     RUNNING  = "RUNNING"   # Fully online, monitored by Watchdog
-    COOLDOWN = "COOLDOWN"  # Temporarily halted, pending re-queue
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LOG STREAMER
@@ -156,15 +155,15 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                 if needs_action:
                     last_action[name]       = now
                     offline_strikes[name]   = 0
-                    # Transition to COOLDOWN first — Watchdog won't re-trigger
-                    bot_instance.set_state(name, CloneState.COOLDOWN)
+                    # Transition back to STOPPED first
+                    bot_instance.set_state(name, CloneState.STOPPED)
                     logger.warning(f"Watchdog: [{name}] {reason}. Queueing restart…")
                     admin = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
                     if admin:
                         try:
                             await application.bot.send_message(
                                 admin,
-                                f"🐕 *Watchdog*: `{name}` → {reason}\n🔵 COOLDOWN → queued relaunch…",
+                                f"🐕 *Watchdog*: `{name}` → {reason}\n🌑 STOPPED → queued relaunch…",
                                 parse_mode="Markdown"
                             )
                         except TelegramError:
@@ -323,7 +322,7 @@ class AegisBot:
             elif d == "mass_start":
                 await context.bot.send_message(
                     chat,
-                    "🚀 *Startup Queue Active*\n⏳ Clones launch sequentially (45s gap).",
+                    "🚀 *Startup Queue Active*\n⏳ Clones launch sequentially (60s gap).",
                     parse_mode="Markdown"
                 )
                 asyncio.create_task(self._mass_start(chat))
@@ -401,8 +400,8 @@ class AegisBot:
 
             if ok is False:
                 # Injection failed
-                self.set_state(name, CloneState.COOLDOWN)
-                logger.error(f"[{name}] Injection failed — COOLDOWN.")
+                self.set_state(name, CloneState.STOPPED)
+                logger.error(f"[{name}] Injection failed — back to STOPPED.")
                 return
 
             # ── 5-MINUTE GRACE PERIOD before RUNNING ────────────────────
@@ -444,9 +443,9 @@ class AegisBot:
                 except Exception:
                     pass
             await self._enqueue_start(name, chat_id)
-            # 45s gap between each clone (inside lock releases)
+            # 60s gap between each clone (inside lock releases)
             if idx < len(clones):
-                await asyncio.sleep(45)
+                await asyncio.sleep(60)
 
     async def _stop_clone(self, name: Optional[str], chat_id):
         if not name: return
@@ -490,7 +489,7 @@ class AegisBot:
             ci = self.config.get_clone(n)
             if ci:
                 await self._enqueue_start(n, admin_id)
-                await asyncio.sleep(45)
+                await asyncio.sleep(60)
 
     # ─────────────────────────────────────────────────────────────────────
     # Helpers
@@ -549,22 +548,8 @@ class AegisBot:
     # Entry-point
     # ─────────────────────────────────────────────────────────────────────
     async def run(self):
-        # 1. SAFE KILL — use PID file, never global pkill
-        pid_file = os.path.join(FARM_DIR, "bot.pid")
-        if os.path.exists(pid_file):
-            try:
-                old_pid = int(open(pid_file).read().strip())
-                if old_pid != os.getpid():
-                    await run_bash(f"kill {old_pid} 2>/dev/null; sleep 2; kill -9 {old_pid} 2>/dev/null")
-                    logger.info(f"Killed previous bot instance (PID {old_pid})")
-            except Exception:
-                pass
-        # Write our own PID
-        try:
-            with open(pid_file, "w") as f:
-                f.write(str(os.getpid()))
-        except Exception:
-            pass
+        # 1. CLEAN SLATE: NO PKILL. Bot assumes unique execution.
+        logger.info(f"💎 PROJECT AEGIS V{VERSION} STARTING — {DEVICE_ID} (Clean Slate)")
 
 
         # 2. Build application

@@ -92,7 +92,6 @@ class UIManager:
             "STOPPED":  "🌑 STOPPED",
             "STARTING": "⏳ STARTING",
             "RUNNING":  "🟢 RUNNING",
-            "COOLDOWN": "🔵 COOLDOWN",
         }
 
         for clone in clones_data:
@@ -166,10 +165,9 @@ class UIManager:
         return (
             "🎮 *AEGIS V4.0 GUIDE*\n\n"
             "State Machine:\n"
-            "  🌑 STOPPED → ⏳ STARTING → 🟢 RUNNING\n"
-            "  🔵 COOLDOWN → re-enters queue\n\n"
+            "  🌑 STOPPED → ⏳ STARTING → 🟢 RUNNING\n\n"
             "• Watchdog is *blind* to non-RUNNING clones\n"
             "• asyncio.Lock enforces single-clone startup\n"
-            "• 45s sequential gap between clones\n"
+            "• 60s sequential gap between clones\n"
             "• 5-min grace after Step 4/4 before monitoring"
         )
