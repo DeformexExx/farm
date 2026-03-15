@@ -37,10 +37,10 @@ class WatchdogPro:
 
     def check_health(self):
         """
-        v6.1 Silent Health Check:
+        v7.1 JSON Revolution Health Check:
         1. 30s grace period.
-        2. PID missing -> Silent False.
-        3. Threads < 110 -> Silent False.
+        2. PID missing -> Returns False.
+        3. Threads < 130 (User threshold) -> Returns False.
         """
         now = time.time()
         if now - self.last_launch_time < 30:
@@ -48,14 +48,13 @@ class WatchdogPro:
 
         pid = self.get_pid()
         if not pid:
-            # Silent recovery
             return False
 
         threads = self.get_thread_count(pid)
-        if threads < 110:
+        # User requested 130 threads monitoring
+        if threads < 130:
             self.fail_count += 1
             if self.fail_count >= 2:
-                # Silent recovery
                 self.fail_count = 0
                 return False
         else:
