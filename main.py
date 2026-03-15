@@ -267,10 +267,11 @@ class AegisNebulaBot:
                             # Notify Admins about the restart
                             for admin_id in self.config.admin_ids:
                                 try:
-                                    await self.application.bot.send_message(
-                                        chat_id=admin_id,
-                                        text=f"⚠️ Watchdog: Процесс '{name}' упал. Перезапуск на сервер №{idx+1}..."
-                                    )
+                                    if self.application and self.application.bot:
+                                        await self.application.bot.send_message(
+                                            chat_id=admin_id,
+                                            text=f"⚠️ Watchdog: Процесс '{name}' упал. Перезапуск на сервер №{idx+1}..."
+                                        )
                                 except Exception: pass
                             
                             # Run Injection (no dedicated status updating message here)

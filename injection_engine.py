@@ -77,15 +77,15 @@ class InjectionEngine:
             await run_bash(f"su -c 'monkey -p com.roblox.{clone_name} -c android.intent.category.LAUNCHER 1'")
             
             if place_id:
-                # Step B: Wait for the app to wake up
-                await asyncio.sleep(3)
+                # Step B: Wait for the app to wake up (CRITICAL 7S FOR UGPHONE)
+                await asyncio.sleep(7)
                 
-                # Step C: Send the Join Intent
+                # Step C: Send the Join Intent (STRIKE)
                 import re
                 share_code = None
                 
                 # Try regex extraction for code
-                match = re.search(r"code=([a-zA-Z0-9]+)", place_id)
+                match = re.search(r"code=([a-zA-Z0-9]+)", str(place_id))
                 if match:
                     share_code = match.group(1)
                 
@@ -95,7 +95,7 @@ class InjectionEngine:
                     await run_bash(join_cmd)
                 else:
                     # Fallback to standard PlaceID Intent or direct URL
-                    if place_id.isdigit():
+                    if str(place_id).isdigit():
                         join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"roblox://placeId={place_id}\" com.roblox.{clone_name}'"
                     else:
                         # Direct intent if it's already a roblox:// link
