@@ -1,304 +1,230 @@
 # -*- coding: utf-8 -*-
 import os
-import time
-import asyncio
-import threading
-import subprocess
 import sys
 import json
-import requests
-import gc
+import asyncio
 import logging
-import psutil
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 
-# Aegis v7.1 Overlord: JSON Revolution
-from hardware_monitor import HardwareMonitor
-from memory_manager import MemoryManager
-from server_engine import ServerEngine
-from watchdog_pro import WatchdogPro
-from config_manager import ConfigManager
-from cookie_injector import CookieInjector
-
-# Constants
-LOG_FILE = "aegis.log"
+# DEVICE INIT
+DEVICE_ID = sys.argv[1] if len(sys.argv) > 1 else "DEV_MASTER"
+CONFIG_FILE = f"{DEVICE_ID}.json"
+BOT_TOKEN_FILE = "config.json"
 SCREENSHOT_PATH = "/data/local/tmp/s.png"
-LOCAL_CONFIG = "config.json"
 
-# Global Identity Context (argv[1] is DEVICE_ID, e.g. DEV_2)
-ACTIVE_DEVICE_ID = sys.argv[1] if len(sys.argv) > 1 else "MASTER"
-
-# Logging pipeline
+# Setup Logging
 logging.basicConfig(
     level=logging.INFO,
-    format=f'%(asctime)s [{ACTIVE_DEVICE_ID}] [%(levelname)s] %(message)s',
-    handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()]
+    format=f'%(asctime)s [{DEVICE_ID}] [%(levelname)s] %(message)s'
 )
-logger = logging.getLogger("AegisV7.1")
+logger = logging.getLogger("AegisV13")
 
-class AegisJSONOverlord:
+class AegisOverlordV13:
     def __init__(self):
-        self.device_id = ACTIVE_DEVICE_ID
-        self.bot_config = self.load_bot_config()
-        self.dm = ConfigManager(self.device_id)
-        self.injector = CookieInjector(self.safe_print)
-        self.watchdogs = {}
-        self.app = None
-        self.loop = None
-        self.selected_users = {} # user_id -> boolean
+        self.device_id = DEVICE_ID
+        self.config_path = CONFIG_FILE
+        self.bot_token = ""
+        self.admin_ids = []
+        self.clones_data = []
         
-        # Load local clones from JSON
-        self.dm.load()
-        self.purge_ghosts()
+        self._load_local_config()
+        self._load_clones_json()
 
-    def load_bot_config(self):
-        if os.path.exists(LOCAL_CONFIG):
-            with open(LOCAL_CONFIG, "r") as f:
-                return json.load(f)
-        return {"bot_token": "", "admin_ids": []}
+    def _load_local_config(self):
+        if os.path.exists(BOT_TOKEN_FILE):
+            try:
+                with open(BOT_TOKEN_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.bot_token = data.get("bot_token", "")
+                    self.admin_ids = data.get("admin_ids", [])
+            except Exception as e:
+                logger.error(f"Failed to load bot config: {e}")
 
-    def purge_ghosts(self):
-        try:
-            curr_pid = os.getpid()
-            cmd = f"su -c \"ps -ef | grep main.py | grep -v grep | grep -v {curr_pid} | awk '{{print $2}}' | xargs kill -9\""
-            subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            logger.info("Ghosts purged.")
-        except: pass
-
-    def safe_print(self, text):
-        prefixed = f"[{self.device_id}] {text}"
-        logger.info(text)
-        if self.app:
-            asyncio.run_coroutine_threadsafe(self.broadcast(prefixed), self.loop)
-
-    async def broadcast(self, text):
-        for admin_id in self.bot_config.get("admin_ids", []):
-            try: await self.app.bot.send_message(chat_id=admin_id, text=text)
-            except: pass
+    def _load_clones_json(self):
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    self.clones_data = json.load(f)
+                logger.info(f"Loaded {len(self.clones_data)} clones from {self.config_path}")
+            except Exception as e:
+                logger.error(f"Failed to load JSON: {e}")
+                self.clones_data = []
+        else:
+            logger.warning(f"Config file not found: {self.config_path}")
+            self.clones_data = []
 
     def get_main_keyboard(self):
-        """v7.1 Russian UI Grid."""
         keyboard = [
-            [KeyboardButton("📊 Мониторинг"), KeyboardButton("🔄 Обновить конфиг")],
-            [KeyboardButton("🖼 Скриншот"), KeyboardButton("🛠 Админка")],
-            [KeyboardButton("📱 Выбрать девайс")]
+            [KeyboardButton("📊 Статус фермы"), KeyboardButton("🔄 Синхронизация с Git")],
+            [KeyboardButton("🖼 Скриншот"), KeyboardButton("🛑 Стоп ВСЕ")]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.effective_user.id not in self.bot_config.get("admin_ids", []): return
-        self.selected_users[update.effective_user.id] = True
+        if update.effective_user.id not in self.admin_ids: return
         await update.message.reply_text(
-            f"🚀 *Aegis Overlord: JSON Revolution*\nДевайс: `{self.device_id}`\nИсточник: `{self.device_id}.json` (Local)",
+            f"👑 *AEGIS OVERLORD v13: MASTERPIECE EDITION*\nУстройство: `{self.device_id}`",
             reply_markup=self.get_main_keyboard(),
             parse_mode='Markdown'
         )
 
-    async def update_config_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.effective_user.id not in self.bot_config.get("admin_ids", []): return
-        await update.message.reply_text("🔄 Обновление конфигов из Git...")
-        try:
-            res = subprocess.run("git pull", shell=True, capture_output=True, text=True)
-            if self.dm.load():
-                await update.message.reply_text(f"✅ Конфиг обновлен!\n```\n{res.stdout}\n```", parse_mode='Markdown')
-            else:
-                await update.message.reply_text("⚠️ Git обновлен, но файл конфига не найден или поврежден.")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Ошибка Git: {e}")
-
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-        if user_id not in self.bot_config.get("admin_ids", []): return
+        if update.effective_user.id not in self.admin_ids: return
         text = update.message.text
-        is_selected = self.selected_users.get(user_id, False)
 
-        if text == "📊 Мониторинг":
-            if is_selected: await self.send_overlord_report(update)
+        if text == "📊 Статус фермы":
+            await self.send_status_report(update)
             
-        elif text == "🔄 Обновить конфиг":
-            if is_selected: await self.update_config_cmd(update, context)
-
-        elif text == "🛠 Админка":
-            if is_selected:
-                kb = [
-                    [InlineKeyboardButton("🚀 Master Re-Inject", callback_data="admin_reinject")],
-                    [InlineKeyboardButton("🔄 Reboot Bot", callback_data="admin_reboot")]
-                ]
-                await update.message.reply_text(f"🛠 [{self.device_id}] Админ-панель:", reply_markup=InlineKeyboardMarkup(kb))
+        elif text == "🔄 Синхронизация с Git":
+            await self.sync_git(update)
 
         elif text == "🖼 Скриншот":
-            if is_selected: await self.take_snap(update.message)
+            await self.take_screenshot(update.message)
 
-        elif text == "📱 Выбрать девайс":
-            kb = [[InlineKeyboardButton(f"✅ Выбрать {self.device_id}", callback_data=f"select_{self.device_id}")]]
-            await update.message.reply_text(f"📱 Устройство: `{self.device_id}`", reply_markup=InlineKeyboardMarkup(kb))
+        elif text == "🛑 Стоп ВСЕ":
+            await self.stop_all(update)
 
-        elif text.startswith("$"):
-            if is_selected:
-                cmd = text[1:].strip()
-                await self.execute_shell(update, cmd)
-
-    async def execute_shell(self, update: Update, cmd):
+    async def get_system_stats(self):
+        ram = "N/A"
+        temp = "N/A"
         try:
-            res = subprocess.run(f"su -c '{cmd}'", shell=True, capture_output=True, text=True, timeout=30)
-            out = (res.stdout + res.stderr).strip() or "[No output]"
-            await update.message.reply_text(f"```bash\n[{self.device_id}]\n{out[:3500]}\n```", parse_mode='Markdown')
-        except Exception as e:
-            await update.message.reply_text(f"[{self.device_id}] Shell Error: {e}")
-
-    async def take_snap(self, message):
-        try:
-            subprocess.run(f"su -c 'screencap -p {SCREENSHOT_PATH}'", shell=True)
-            if os.path.exists(SCREENSHOT_PATH):
-                with open(SCREENSHOT_PATH, 'rb') as f:
-                    await message.reply_photo(photo=f, caption=f"📸 Снимок: {self.device_id}")
-                os.remove(SCREENSHOT_PATH)
+            import psutil
+            mem = psutil.virtual_memory()
+            ram = f"{mem.percent}%"
         except: pass
+            
+        try:
+            paths = ["/sys/class/thermal/thermal_zone0/temp", "/sys/class/thermal/thermal_zone1/temp"]
+            for path in paths:
+                if os.path.exists(path):
+                    with open(path, "r") as f:
+                        temp = f"{int(int(f.read()) / 1000)}°C"
+                    break
+        except: pass
+        return ram, temp
 
-    async def send_overlord_report(self, update: Update):
-        clones = self.dm.get_clones()
-        if not clones:
-            await update.message.reply_text(f"❌ *Ошибка*: Пустой конфиг для `{self.device_id}`!")
-            return
+    async def run_bash(self, cmd):
+        process = await asyncio.create_subprocess_shell(
+            cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        return process.returncode, stdout.decode(), stderr.decode()
 
-        active_count = 0
-        clones_list = []
+    async def send_status_report(self, update: Update):
+        self._load_clones_json()
+        ram, temp = await self.get_system_stats()
+        
+        msg = f"📱 Device: `{self.device_id}`\n🧠 RAM: {ram} | 🌡 Temp: {temp}"
+        
         keyboard = []
-        
-        stats = HardwareMonitor.get_dashboard_report(self.device_id, "")
-        
-        for c in clones:
-            pkg = f"com.roblox.{c['name']}"
-            wd = self.watchdogs.get(pkg)
-            is_alive = wd.get_pid() is not None if wd else False
-            
-            status_text = "🟢 OK" if is_alive else "🔴 OFF"
-            if c.get('status') == "⚠️ Ошибка": status_text = "⚠️ ERR"
-            
-            clones_list.append(f"• `{c['name']}`: {status_text} ({c['nickname']})")
-            
+        for clone in self.clones_data:
+            name = clone.get("name", "Unknown")
             row = [
-                InlineKeyboardButton(f"▶️ Запуск", callback_data=f"start_{c['name']}"),
-                InlineKeyboardButton(f"⏹ Стоп", callback_data=f"stop_{c['name']}"),
-                InlineKeyboardButton(f"🧹 Очистка", callback_data=f"clean_{c['name']}")
+                InlineKeyboardButton(f"▶️ Запуск {name}", callback_data=f"start_clone_{name}"),
+                InlineKeyboardButton(f"⏹ Стоп {name}", callback_data=f"stop_clone_{name}"),
+                InlineKeyboardButton(f"🧹 Кэш {name}", callback_data=f"clear_cache_{name}")
             ]
             keyboard.append(row)
-            if is_alive: active_count += 1
 
-        report = f"🏰 *Overlord Monitor: {self.device_id}*\n```\n{stats}\n```\n*Аккаунты ({active_count}/{len(clones)}):*\n" + "\n".join(clones_list)
-        await update.message.reply_text(report, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+
+    async def sync_git(self, update: Update):
+        msg = await update.message.reply_text("⏳ Ожидание Git...")
+        cmd = "cd ~/farm && git reset --hard origin/main && git pull"
+        ret, stdout, stderr = await self.run_bash(cmd)
+        
+        self._load_clones_json()
+        
+        if ret == 0:
+            await msg.edit_text("✅ Конфиги успешно загружены с GitHub. Нажмите [📊 Статус фермы] для обновления меню.")
+        else:
+            await msg.edit_text(f"❌ Ошибка Git:\n{stderr}")
+
+    async def take_screenshot(self, message):
+        await self.run_bash(f"su -c 'screencap -p {SCREENSHOT_PATH}'")
+        if os.path.exists(SCREENSHOT_PATH):
+            with open(SCREENSHOT_PATH, 'rb') as f:
+                await message.reply_photo(photo=f, caption=f"📸 {self.device_id}")
+            os.remove(SCREENSHOT_PATH)
+
+    async def stop_all(self, update: Update):
+        msg = await update.message.reply_text("⏳ Остановка всех клонов...")
+        for clone in self.clones_data:
+            name = clone.get("name")
+            if name:
+                await self.run_bash(f"su -c 'am force-stop com.roblox.{name}'")
+        await msg.edit_text("✅ Все клоны остановлены.")
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        if query.from_user.id not in self.bot_config.get("admin_ids", []): return
+        if query.from_user.id not in self.admin_ids: return
         data = query.data
+
+        await query.answer()
+
+        if data.startswith("start_clone_"):
+            clone_name = data.replace("start_clone_", "")
+            
+            cookie = next((c.get("cookie") for c in self.clones_data if c.get("name") == clone_name), None)
+            if not cookie:
+                await context.bot.send_message(chat_id=query.message.chat_id, text=f"❌ Cookie для {clone_name} не найден в {self.config_path}.")
+                return
+
+            asyncio.create_task(self.execute_injection_sequence(query.message.chat_id, context.bot, clone_name, cookie))
+
+        elif data.startswith("stop_clone_"):
+            clone_name = data.replace("stop_clone_", "")
+            await self.run_bash(f"su -c 'am force-stop com.roblox.{clone_name}'")
+            await context.bot.send_message(chat_id=query.message.chat_id, text=f"✅ {clone_name} остановлен.")
+
+        elif data.startswith("clear_cache_"):
+            clone_name = data.replace("clear_cache_", "")
+            await self.run_bash(f"su -c 'am force-stop com.roblox.{clone_name}'")
+            await self.run_bash(f"su -c 'rm -rf /data/data/com.roblox.{clone_name}/cache/*'")
+            await context.bot.send_message(chat_id=query.message.chat_id, text=f"✅ Кэш {clone_name} очищен.")
+
+    async def execute_injection_sequence(self, chat_id, bot, clone_name, cookie):
+        status_msg = await bot.send_message(chat_id=chat_id, text=f"⏳ Инъекция в {clone_name}...")
         
-        if data.startswith("select_"):
-            target = data.replace("select_", "")
-            self.selected_users[query.from_user.id] = (target == self.device_id)
-            if target == self.device_id:
-                await query.edit_message_text(f"✅ Устройство `{self.device_id}` активировано.")
-            await query.answer()
+        try:
+            # 1. Force Stop
+            await self.run_bash(f"su -c 'am force-stop com.roblox.{clone_name}'")
+            await asyncio.sleep(1)
 
-        elif data.startswith("start_"):
-            instance = data.replace("start_", "")
-            pkg = f"com.roblox.{instance}"
-            self.safe_print(f"🚀 Surgical Launch: {instance}")
-            threading.Thread(target=self.surgical_launch, args=(instance,)).start()
-            await query.answer(f"Запуск {instance}...")
+            # 2. SQLite Injection
+            db_path = f"/data/data/com.roblox.{clone_name}/app_webview/Default/Cookies"
+            sql_query = f"DELETE FROM cookies WHERE host_key LIKE '%roblox.com%'; INSERT INTO cookies (host_key, name, value, path, expires_utc, is_secure, is_httponly, has_expires, is_persistent, samesite, source_port) VALUES ('.roblox.com', '.ROBLOSECURITY', '{cookie}', '/', 13333333333333333, 1, 1, 1, 1, -1, -1);"
             
-        elif data.startswith("stop_"):
-            instance = data.replace("stop_", "")
-            pkg = f"com.roblox.{instance}"
-            if pkg in self.watchdogs: self.watchdogs[pkg].force_stop()
-            self.dm.update_status(instance, "🔴 OFF")
-            await query.answer(f"Остановлен {instance}")
+            inj_cmd = f"su -c \"sqlite3 {db_path} \\\"{sql_query}\\\"\""
+            await self.run_bash(inj_cmd)
 
-        elif data.startswith("clean_"):
-            instance = data.replace("clean_", "")
-            subprocess.run(f"su -c 'am force-stop com.roblox.{instance}'", shell=True)
-            subprocess.run(f"su -c 'rm -rf /data/data/com.roblox.{instance}/cache/*'", shell=True)
-            await query.answer(f"Кэш {instance} очищен", show_alert=True)
+            # 3. Fix Permissions
+            chown_cmd = f"su -c \"chown \\$(stat -c %u:%g /data/data/com.roblox.{clone_name}) /data/data/com.roblox.{clone_name}/app_webview/Default/Cookies\""
+            await self.run_bash(chown_cmd)
 
-        elif data == "admin_reinject":
-            threading.Thread(target=self.master_reinject).start()
-            await query.answer("Master Re-Inject запущен")
+            # 4. Launch the Clone
+            launch_cmd = f"su -c \"monkey -p com.roblox.{clone_name} -c android.intent.category.LAUNCHER 1\""
+            await self.run_bash(launch_cmd)
 
-        elif data == "admin_reboot":
-            os.execv(sys.executable, ['python'] + sys.argv)
-
-    def surgical_launch(self, instance):
-        """v7.1 Surgery: Stop -> Inject w/ Chown -> Monkey Launch."""
-        pkg = f"com.roblox.{instance}"
-        if pkg not in self.watchdogs:
-            self.watchdogs[pkg] = WatchdogPro(pkg, lambda x: logger.info(x))
-
-        clone = next((c for c in self.dm.get_clones() if c['name'] == instance), None)
-        if not clone: return
-
-        # 1. Inject (Refined with direct Owner discovery)
-        self.dm.update_status(instance, "⏳ Injecting")
-        if self.injector.inject(instance, clone['cookie']):
-            # 2. Start
-            self.safe_print(f"Запуск приложения {instance}...")
-            MemoryManager.v4_pre_launch_optimize()
-            subprocess.run(f"su -c 'monkey -p {pkg} 1'", shell=True)
+            await status_msg.edit_text(f"✅ {clone_name} запущен.")
             
-            time.sleep(15)
-            link = ServerEngine.get_random_server() or self.bot_config.get("default_link", "")
-            subprocess.run(f"su -c 'am start -a android.intent.action.VIEW -d \"{link}\" {pkg}'", shell=True)
-            
-            self.watchdogs[pkg].last_launch_time = time.time()
-            self.dm.update_status(instance, "✅ OK")
-        else:
-            self.dm.update_status(instance, "❌ ERR_INJECT")
-
-    def monitoring_loop(self):
-        self.safe_print("Monitoring Loop (JSON context) active.")
-        while True:
-            # Check Health for all clones in JSON
-            for c in self.dm.get_clones():
-                pkg = f"com.roblox.{c['name']}"
-                if pkg not in self.watchdogs:
-                    self.watchdogs[pkg] = WatchdogPro(pkg, lambda x: logger.info(x))
-                
-                wd = self.watchdogs[pkg]
-                if not wd.check_health():
-                    # Thread count < 130 or PID missing
-                    if wd.get_pid():
-                        self.safe_print(f"⚠️ {c['name']} Freeze detected (Low threads)!")
-                        self.dm.update_status(c['name'], "⚠️ Ошибка")
-                    threading.Thread(target=self.surgical_launch, args=(c['name'],)).start()
-            
-            gc.collect()
-            time.sleep(240)
-
-    def master_reinject(self):
-        for c in self.dm.get_clones():
-            pkg = f"com.roblox.{c['name']}"
-            if pkg in self.watchdogs: self.watchdogs[pkg].force_stop()
-        
-        MemoryManager.system_deep_clean()
-        for c in self.dm.get_clones():
-            self.surgical_launch(c['name'])
-            time.sleep(20)
+        except Exception as e:
+            logger.error(f"Launch Sequence Error for {clone_name}: {e}")
+            await status_msg.edit_text(f"❌ Ошибка запуска {clone_name}: {e}")
 
     def run(self):
-        async def post_init(application):
-            self.app = application
-            self.loop = asyncio.get_event_loop()
-            await self.broadcast(f"🚀 Overlord JSON Revision Online: {self.device_id}")
-
-        app = ApplicationBuilder().token(self.bot_config["bot_token"]).post_init(post_init).build()
+        if not self.bot_token:
+            logger.error("Bot token missing in config.json")
+            return
+            
+        app = ApplicationBuilder().token(self.bot_token).build()
         app.add_handler(CommandHandler("start", self.start_cmd))
-        app.add_handler(CommandHandler("update_config", self.update_config_cmd))
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_text))
         app.add_handler(CallbackQueryHandler(self.handle_callback))
         
-        threading.Thread(target=self.monitoring_loop, daemon=True).start()
+        logger.info(f"Aegis Overlord v13 Masterpiece started for {self.device_id}")
         app.run_polling()
 
 if __name__ == "__main__":
-    time.sleep(2)
-    AegisJSONOverlord().run()
+    AegisOverlordV13().run()
