@@ -273,40 +273,40 @@ class AegisNebulaBot:
                 await query.edit_message_text(UIManager.get_help_page(p), reply_markup=UIManager.get_help_keyboard(p), parse_mode='Markdown')
             
             # Clone Management
+            elif data == "mass_start":
+                clones = self.config.clones_data
+                count = len(clones)
+                await context.bot.send_message(chat_id=query.message.chat_id, text=f"🚀 Начинаю массовый запуск {count} клонов...")
+                for clone_info in clones:
+                    name = clone_info.get("name")
+                    if name:
+                        await self._start_clone_logic(name, query.message.chat_id, context)
+                        await asyncio.sleep(3)
+                        await context.bot.send_message(chat_id=query.message.chat_id, text=f"⏳ [{name}] запущен, готовлю следующий...")
+                await context.bot.send_message(chat_id=query.message.chat_id, text="✅ Массовый запуск завершен!")
+
+            elif data == "mass_stop":
+                clones = self.config.clones_data
+                count = len(clones)
+                await context.bot.send_message(chat_id=query.message.chat_id, text=f"❄️ Начинаю массовую остановку {count} клонов...")
+                for clone_info in clones:
+                    name = clone_info.get("name")
+                    if name:
+                        await self._stop_clone_logic(name, chat_id=query.message.chat_id, context=context)
+                        await asyncio.sleep(1)
+                await context.bot.send_message(chat_id=query.message.chat_id, text="✅ Массовая остановка завершена!")
+
             elif data.startswith("clone_menu_"):
                 name = data.replace("clone_menu_", "")
                 await query.edit_message_text(f"🎮 *Управление клоном:* `{name.upper()}`", reply_markup=UIManager.get_single_clone_keyboard(name), parse_mode='Markdown')
             
             elif data.startswith("start_"):
                 clone_name = data.replace("start_", "")
-                clone_info = self.config.get_clone(clone_name)
-                if not clone_info or not clone_info.get("cookie"):
-                    await context.bot.send_message(chat_id=query.message.chat_id, text=f"❌ Ошибка: Конфиг для {clone_name} не найден.")
-                    return
-
-                self.persistence.add_target(clone_name)
-                clones_list = [c.get("name") for c in self.config.clones_data]
-                try:
-                    idx = clones_list.index(clone_name)
-                except ValueError:
-                    idx = 0
-                
-                servers_list = self.config.servers_list
-                url = servers_list[idx] if idx < len(servers_list) else (servers_list[0] if servers_list else None)
-                
-                self.active_clones.add(clone_name)
-                status_msg = await context.bot.send_message(
-                    chat_id=query.message.chat_id, 
-                    text=f"🎮 Запуск {clone_name}..."
-                )
-                asyncio.create_task(self._run_injection(clone_name, clone_info, url, status_msg))
+                await self._start_clone_logic(clone_name, query.message.chat_id, context)
 
             elif data.startswith("stop_"):
                 clone_name = data.replace("stop_", "")
-                self.active_clones.discard(clone_name)
-                await InjectionEngine.stop(clone_name)
-                await context.bot.send_message(chat_id=query.message.chat_id, text=f"✅ {clone_name} остановлен.")
-                await self.update_dashboard()
+                await self._stop_clone_logic(clone_name, query.message.chat_id, context)
 
             elif data.startswith("clean_"):
                 clone_name = data.replace("clean_", "")
@@ -319,6 +319,32 @@ class AegisNebulaBot:
             logger.error(f"Callback Exception: {e}", exc_info=True)
             await context.bot.send_message(chat_id=query.message.chat_id, text=f"❌ КРИТИЧЕСКАЯ ОШИБКА PYTHON: {e}")
 
+
+    async def _start_clone_logic(self, clone_name, chat_id, context):
+        clone_info = self.config.get_clone(clone_name)
+        if not clone_info or not clone_info.get("cookie"):
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ Ошибка: Конфиг для {clone_name} не найден.")
+            return
+
+        self.persistence.add_target(clone_name)
+        clones_list = [c.get("name") for c in self.config.clones_data]
+        try:
+            idx = clones_list.index(clone_name)
+        except ValueError:
+            idx = 0
+        
+        servers_list = self.config.servers_list
+        url = servers_list[idx] if idx < len(servers_list) else (servers_list[0] if servers_list else None)
+        
+        self.active_clones.add(clone_name)
+        status_msg = await context.bot.send_message(chat_id=chat_id, text=f"🎮 Запуск {clone_name}...")
+        asyncio.create_task(self._run_injection(clone_name, clone_info, url, status_msg))
+
+    async def _stop_clone_logic(self, clone_name, chat_id, context):
+        self.active_clones.discard(clone_name)
+        await InjectionEngine.stop(clone_name)
+        await context.bot.send_message(chat_id=chat_id, text=f"✅ {clone_name} остановлен.")
+        await self.update_dashboard()
 
     async def _run_injection(self, clone_name, clone_info, server_url, status_msg):
         success = await InjectionEngine.inject_and_launch(
