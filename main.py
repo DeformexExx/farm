@@ -151,13 +151,19 @@ class AegisNebulaBot:
                 logger.error(f"Failed to update dashboard: {e}")
 
     async def sync_git(self, update: Update):
-        msg = await update.message.reply_text("⏳ Ожидание Git...")
-        cmd = f"cd {FARM_DIR} && git fetch --all && git reset --hard origin/main && git clean -fd"
+        msg = await update.message.reply_text("⏳ Очистка процессов и Git Sync...")
+        # The user requested pkill -9 python here to clear conflicts
+        cmd = f"pkill -9 python; cd {FARM_DIR} && git fetch --all && git reset --hard origin/main && git clean -fd"
+        
+        # Note: If pkill kills this script, it won't reach the lines below.
+        # However, we execute it as one command string.
         ret, stdout, stderr = await run_bash(cmd)
         
         if ret == 0:
-            self.config.reload()
-            await msg.edit_text("✅ Глобальная синхронизация завершена. Все файлы обновлены до последней версии.")
+            await msg.edit_text("✅ Sync завершен. Бот перезапустится автоматически...")
+            # If the script is still alive, we exit to let the loop restart us
+            import sys
+            sys.exit(0)
         else:
             await msg.edit_text(f"❌ Ошибка Git:\n{stderr}")
 

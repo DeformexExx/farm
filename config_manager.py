@@ -11,18 +11,35 @@ class ConfigManager:
         self.farm_dir = farm_dir
         self.config_file = os.path.join(farm_dir, f"{device_id}.json")
         self.bot_token_file = os.path.join(farm_dir, "config.json")
+        self.servers_file = os.path.join(farm_dir, "servers.json")
         
         self.bot_token = ""
         self.admin_ids = []
         self.clones_data = []
+        self.servers_list = []
         
         self.reload()
 
     def reload(self):
-        """Перезагружает оба конфигурационных файла с диска"""
+        """Перезагружает все конфигурационные файлы с диска"""
         self._load_bot_config()
         self._load_clones_config()
+        self._load_servers_list()
         logger.info("Configs reloaded successfully.")
+
+    def _load_servers_list(self):
+        if os.path.exists(self.servers_file):
+            try:
+                with open(self.servers_file, "r", encoding="utf-8") as f:
+                    self.servers_list = json.load(f)
+                    if not isinstance(self.servers_list, list):
+                        self.servers_list = [self.servers_list] if self.servers_list else []
+            except Exception as e:
+                logger.error(f"Failed to load servers list: {e}")
+                self.servers_list = []
+        else:
+            logger.warning(f"Servers file not found: {self.servers_file}")
+            self.servers_list = []
 
     def _load_bot_config(self):
         if os.path.exists(self.bot_token_file):
