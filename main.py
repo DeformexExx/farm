@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V3.0 Industrial Rebuild
+# main.py — Project Aegis V4.0 State Machine Edition
 import os
 import sys
+import enum
+import asyncio
+import logging
+import time
+from typing import Optional, Dict
 
 # ── ABSOLUTE PATH LOCK ─────────────────────────────────────────────────────
 _bot_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(_bot_dir)
 sys.path.insert(0, _bot_dir)
 
-import asyncio
-import logging
-import time
-from typing import Optional
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder, Application, CommandHandler,
@@ -19,15 +20,17 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError
 
-from config_manager     import ConfigManager
-from ui_manager         import UIManager
-from monitor            import MonitorEngine
-from injection_engine   import InjectionEngine
-from bash_utils         import run_bash
+from config_manager      import ConfigManager
+from ui_manager          import UIManager
+from monitor             import MonitorEngine
+from injection_engine    import InjectionEngine
+from bash_utils          import run_bash
 from persistence_manager import PersistenceManager
 
-# ── VERSION (HARDCODED — DO NOT CHANGE) ────────────────────────────────────
-VERSION = "3.0"
+# ═══════════════════════════════════════════════════════════════════════════
+# VERSION
+# ═══════════════════════════════════════════════════════════════════════════
+VERSION = "4.0"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -36,23 +39,27 @@ if len(sys.argv) < 2:
 
 DEVICE_ID = sys.argv[1]
 FARM_DIR  = _bot_dir
-
 BOOT_LOG  = os.path.join(FARM_DIR, "boot_log.txt")
 
 # ── LOGGING ────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
-    format=f"%(asctime)s [{DEVICE_ID}] [%(levelname)s] %(message)s",
+    format=f"%(asctime)s [{DEVICE_ID}/V{VERSION}] [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV30")
+logger = logging.getLogger("AegisV40")
 
-# Version integrity check
-if VERSION != "3.0":
-    logger.critical(f"⚠️  VERSION MISMATCH: expected 3.0, got {VERSION}")
+# ═══════════════════════════════════════════════════════════════════════════
+# STATE MACHINE ENUM
+# ═══════════════════════════════════════════════════════════════════════════
+class CloneState(str, enum.Enum):
+    STOPPED  = "STOPPED"   # Not running
+    STARTING = "STARTING"  # 1/4 - 4/4 + 300s grace window
+    RUNNING  = "RUNNING"   # Fully online, monitored by Watchdog
+    COOLDOWN = "COOLDOWN"  # Temporarily halted, pending re-queue
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LOG STREAMER
@@ -61,16 +68,15 @@ class TelegramLogHandler(logging.Handler):
     def __init__(self, streamer):
         super().__init__()
         self.streamer = streamer
-
     def emit(self, record):
         self.streamer.add_line(f"[{record.levelname[:3]}] {self.format(record)}")
 
 
 class LogStreamer:
     def __init__(self, bot, chat_id: int):
-        self.bot     = bot
-        self.chat_id = chat_id
-        self.buffer  = []
+        self.bot      = bot
+        self.chat_id  = chat_id
+        self.buffer   = []
         self._running = False
 
     def add_line(self, text: str):
@@ -84,11 +90,7 @@ class LogStreamer:
                 batch = "\n".join(self.buffer[-30:])
                 self.buffer.clear()
                 try:
-                    await self.bot.send_message(
-                        self.chat_id,
-                        f"<code>{batch}</code>",
-                        parse_mode="HTML"
-                    )
+                    await self.bot.send_message(self.chat_id, f"<code>{batch}</code>", parse_mode="HTML")
                 except Exception:
                     pass
 
@@ -97,85 +99,78 @@ class LogStreamer:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# WATCHDOG — stand-alone coroutine (receives application explicitly)
+# WATCHDOG — state-gated: only monitors RUNNING clones
 # ═══════════════════════════════════════════════════════════════════════════
 async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     """
-    Runs forever. Checks every 60s.
-    Uses application.bot — no NoneType risk.
-
-    Anti-restart-loop rules:
-      1. GRACE PERIOD: Skip any clone started within the last 300s.
-      2. 3-STRIKE OFFLINE: Only restart after 3 consecutive Offline checks.
-      3. TIMED COOLDOWN:   After a restart, ignore the clone for 300s.
+    CRITICAL RULE: Watchdog is LEGALLY BLIND to any clone not in RUNNING state.
+    Only RUNNING clones are checked for Frozen/Leaking conditions.
     """
     import re
 
-    # {clone_name: timestamp_of_last_restart}
-    last_restart: dict[str, float] = {}
-    # {clone_name: consecutive_offline_count}
-    offline_strikes: dict[str, int] = {}
+    offline_strikes: Dict[str, int]   = {}
+    last_action:     Dict[str, float] = {}
 
     while True:
         await asyncio.sleep(60)
         try:
             now = time.time()
 
-            for name in list(bot_instance.active_clones):
+            for name, state in list(bot_instance.clone_states.items()):
 
-                # ── 1. STARTUP GRACE PERIOD (300s) ──────────────────────────
-                last_start = bot_instance.startup_times.get(name, 0)
-                if now - last_start < 300:
-                    logger.info(f"Watchdog: [{name}] in grace period ({int(300 - (now - last_start))}s left). Skip.")
-                    offline_strikes[name] = 0  # reset strikes during grace
+                # ══ STATE GATE — The core fix ══════════════════════════════
+                if state != CloneState.RUNNING:
+                    # Log why we're skipping
+                    if state == CloneState.STARTING:
+                        logger.debug(f"Watchdog: [{name}] STARTING — ignored.")
                     continue
 
-                # ── 2. POST-RESTART COOLDOWN (300s) ─────────────────────────
-                last_rst = last_restart.get(name, 0)
-                if now - last_rst < 300:
+                # ── Post-action cooldown 60s ────────────────────────────
+                if now - last_action.get(name, 0) < 60:
                     continue
 
-                # ── 3. STATUS CHECK ──────────────────────────────────────────
+                # ── Get status ──────────────────────────────────────────
                 st = await MonitorEngine.get_clone_status(name)
-                needs_restart = False
-                reason = ""
+                needs_action = False
+                reason       = ""
 
                 if "Offline" in st:
                     offline_strikes[name] = offline_strikes.get(name, 0) + 1
                     if offline_strikes[name] >= 3:
-                        reason = f"Offline x{offline_strikes[name]}"
-                        needs_restart = True
+                        reason       = f"Offline ×{offline_strikes[name]}"
+                        needs_action = True
                     else:
-                        logger.info(f"Watchdog: [{name}] Offline strike {offline_strikes[name]}/3. Waiting…")
+                        logger.info(f"Watchdog [{name}]: Offline strike {offline_strikes[name]}/3")
                 else:
-                    # Reset strike counter when online
                     offline_strikes[name] = 0
                     m = re.search(r"Thr:\s*(\d+)", st)
                     if m:
                         thr = int(m.group(1))
                         if thr < 130:
-                            reason = f"Frozen (Thr:{thr})"
-                            needs_restart = True
+                            reason       = f"Frozen (Thr:{thr})"
+                            needs_action = True
                         elif thr > 500:
-                            reason = f"Leaking (Thr:{thr})"
-                            needs_restart = True
+                            reason       = f"Leaking (Thr:{thr})"
+                            needs_action = True
 
-                # ── 4. RESTART ───────────────────────────────────────────────
-                if needs_restart:
-                    last_restart[name] = now
-                    offline_strikes[name] = 0
-                    logger.warning(f"Watchdog: [{name}] {reason}. Restarting…")
-                    admin_id = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
-                    if admin_id:
+                if needs_action:
+                    last_action[name]       = now
+                    offline_strikes[name]   = 0
+                    # Transition to COOLDOWN first — Watchdog won't re-trigger
+                    bot_instance.set_state(name, CloneState.COOLDOWN)
+                    logger.warning(f"Watchdog: [{name}] {reason}. Queueing restart…")
+                    admin = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
+                    if admin:
                         try:
                             await application.bot.send_message(
-                                admin_id,
-                                f"🐕 *Watchdog*: `{name}` → {reason}\n⚡️ Перезапуск…",
+                                admin,
+                                f"🐕 *Watchdog*: `{name}` → {reason}\n🔵 COOLDOWN → queued relaunch…",
                                 parse_mode="Markdown"
                             )
                         except TelegramError:
                             pass
-                    await bot_instance._launch_clone(name, admin_id)
+                    # Kick into startup queue via background task
+                    asyncio.create_task(bot_instance._enqueue_start(name, admin))
 
             await bot_instance.refresh_dashboard()
 
@@ -191,32 +186,46 @@ class AegisBot:
         self.config      = ConfigManager(DEVICE_ID, FARM_DIR)
         self.persistence = PersistenceManager(FARM_DIR)
         self.application: Optional[Application] = None
-        self._dash_msg   = None      # last dashboard message (for edit)
+        self._dash_msg   = None
         self._streamer   = None
         self._log_handler = None
         self._console_on: bool = self.persistence.console_mode
 
-        # startup_times: {clone_name: timestamp} — watchdog skips for 300s
-        self.startup_times: dict[str, float] = {}
+        # ── STATE MACHINE ─────────────────────────────────────────────────
+        # {clone_name: CloneState}
+        self.clone_states: Dict[str, CloneState] = {}
 
-        # Auto-resume: restore active_clones from persistence
-        # Uses active_clones list (richer than targets dict)
-        if self.persistence.auto_restore:
-            saved = getattr(self.persistence, "active_clones", [])
-            self.active_clones: set[str] = set(saved) if saved else set(getattr(self.persistence, "targets", {}).keys())
-        else:
-            self.active_clones = set()
+        # Uptime tracking: {clone_name: timestamp when RUNNING reached}
+        self.running_since: Dict[str, float] = {}
 
-    # ── Admin guard ────────────────────────────────────────────────────────
+        # asyncio.Lock — only ONE clone in STARTING state at a time
+        self._start_lock = asyncio.Lock()
+
+        # Initialize all known clones to STOPPED
+        for c in self.config.clones_data:
+            n = c.get("name")
+            if n:
+                self.clone_states[n] = CloneState.STOPPED
+
+    # ── State helpers ─────────────────────────────────────────────────────
+    def set_state(self, name: str, state: CloneState):
+        old = self.clone_states.get(name, CloneState.STOPPED)
+        self.clone_states[name] = state
+        if state == CloneState.RUNNING:
+            self.running_since[name] = time.time()
+        elif old == CloneState.RUNNING:
+            self.running_since.pop(name, None)
+        logger.info(f"State [{name}]: {old.value} → {state.value}")
+
+    # ── Admin guard ───────────────────────────────────────────────────────
     async def _is_admin(self, uid: int) -> bool:
         return uid in self.config.admin_ids
 
     # ─────────────────────────────────────────────────────────────────────
-    # Command / Text handlers
+    # Handlers
     # ─────────────────────────────────────────────────────────────────────
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self._is_admin(update.effective_user.id):
-            return
+        if not await self._is_admin(update.effective_user.id): return
         await update.message.reply_text(
             UIManager.get_welcome_text(DEVICE_ID),
             reply_markup=UIManager.get_main_keyboard(),
@@ -224,9 +233,8 @@ class AegisBot:
         )
 
     async def cmd_console(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Display last 15 lines of boot_log.txt in a code block."""
-        if not await self._is_admin(update.effective_user.id):
-            return
+        """Last 15 lines of boot_log.txt."""
+        if not await self._is_admin(update.effective_user.id): return
         try:
             if os.path.exists(BOOT_LOG):
                 with open(BOOT_LOG, "r", encoding="utf-8") as f:
@@ -239,16 +247,12 @@ class AegisBot:
             await update.message.reply_text(f"❌ Console error: {e}")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self._is_admin(update.effective_user.id):
-            return
+        if not await self._is_admin(update.effective_user.id): return
         t = update.message.text
         if   t == "📱 DEVICE": await self._open_device(update)
         elif t == "🤖 CLONES": await self.open_clones_hub(update)
         elif t == "⚙️ SYSTEM": await self._open_system(update)
 
-    # ─────────────────────────────────────────────────────────────────────
-    # Menu openers
-    # ─────────────────────────────────────────────────────────────────────
     async def _open_device(self, update: Update):
         ram, cpu, temp = await MonitorEngine.get_system_stats()
         await update.message.reply_text(
@@ -258,135 +262,96 @@ class AegisBot:
         )
 
     async def _open_system(self, update: Update):
-        cons = getattr(self, "_console_on", False)
         await update.message.reply_text(
             "⚙️ *SYSTEM*",
-            reply_markup=UIManager.get_system_keyboard(cons, self.persistence.auto_restore),
+            reply_markup=UIManager.get_system_keyboard(self._console_on, self.persistence.auto_restore),
             parse_mode="Markdown"
         )
 
     async def open_clones_hub(self, update: Update):
         try:
             self.config.reload()
-            status_map = {}
-            for c in self.config.clones_data:
-                n = c.get("name")
-                if n:
-                    status_map[n] = await MonitorEngine.get_clone_status(n)
-
-            # ── SAFE GETATTR FIX (Line 162 equivalent) ──────────────────
-            targets = getattr(self.persistence, "targets", {})
-
-            text = UIManager.format_clones_hub(self.config.clones_data, status_map, targets)
+            text = self._build_hub_text()
             kb   = UIManager.get_clones_hub_keyboard(self.config.clones_data)
-            self._dash_msg = await update.message.reply_text(
-                text, reply_markup=kb, parse_mode="Markdown"
-            )
+            self._dash_msg = await update.message.reply_text(text, reply_markup=kb, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"open_clones_hub error: {e}")
-            await update.message.reply_text(f"❌ Ошибка Hub: {e}")
+            await update.message.reply_text(f"❌ Hub error: {e}")
+
+    def _build_hub_text(self) -> str:
+        state_map  = {n: s.value for n, s in self.clone_states.items()}
+        return UIManager.format_clones_hub(self.config.clones_data, state_map, self.running_since)
 
     async def refresh_dashboard(self):
-        """Edit the last Hub message in-place."""
-        if not self._dash_msg:
-            return
+        if not self._dash_msg: return
         try:
-            status_map = {}
-            for c in self.config.clones_data:
-                n = c.get("name")
-                if n:
-                    status_map[n] = await MonitorEngine.get_clone_status(n)
-
-            targets = getattr(self.persistence, "targets", {})
-            text = UIManager.format_clones_hub(self.config.clones_data, status_map, targets)
+            text = self._build_hub_text()
             kb   = UIManager.get_clones_hub_keyboard(self.config.clones_data)
             await self._dash_msg.edit_text(text, reply_markup=kb, parse_mode="Markdown")
         except Exception:
-            pass  # Message too old / unchanged → ignore silently
+            pass
 
     # ─────────────────────────────────────────────────────────────────────
     # Callback handler
     # ─────────────────────────────────────────────────────────────────────
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         q = update.callback_query
-        if not await self._is_admin(q.from_user.id):
-            return
+        if not await self._is_admin(q.from_user.id): return
         await q.answer()
-        d = q.data
+        d    = q.data
         chat = q.message.chat_id
-
         try:
             if d == "nav_home":
-                await q.message.reply_text(
-                    UIManager.get_welcome_text(DEVICE_ID),
-                    reply_markup=UIManager.get_main_keyboard(),
-                    parse_mode="Markdown"
-                )
+                await q.message.reply_text(UIManager.get_welcome_text(DEVICE_ID),
+                                           reply_markup=UIManager.get_main_keyboard(), parse_mode="Markdown")
 
             elif d == "toggle_restore":
                 self.persistence.auto_restore = not self.persistence.auto_restore
                 self.persistence.save()
-                cons = getattr(self, "_console_on", False)
                 await q.edit_message_reply_markup(
-                    UIManager.get_system_keyboard(cons, self.persistence.auto_restore)
-                )
+                    UIManager.get_system_keyboard(self._console_on, self.persistence.auto_restore))
 
             elif d == "toggle_console":
                 await self._toggle_console(context, chat)
-                cons = getattr(self, "_console_on", False)
                 await q.edit_message_reply_markup(
-                    UIManager.get_system_keyboard(cons, self.persistence.auto_restore)
-                )
+                    UIManager.get_system_keyboard(self._console_on, self.persistence.auto_restore))
 
-            elif d == "sys_sync":
-                await self._git_sync(chat)
-
-            elif d == "sys_screenshot":
-                await self._take_screenshot(q.message)
-
-            elif d == "sys_help":
-                await q.message.reply_text(UIManager.get_help_text(), parse_mode="Markdown")
+            elif d == "sys_sync":  await self._git_sync(chat)
+            elif d == "sys_screenshot": await self._take_screenshot(q.message)
+            elif d == "sys_help": await q.message.reply_text(UIManager.get_help_text(), parse_mode="Markdown")
 
             elif d == "mass_start":
                 await context.bot.send_message(
                     chat,
-                    f"🚀 *Startup Queue Active*\n⏳ Clones will launch one every 45s to avoid OS overload.",
+                    "🚀 *Startup Queue Active*\n⏳ Clones launch sequentially (45s gap).",
                     parse_mode="Markdown"
                 )
-                asyncio.create_task(self._startup_queue(self.config.clones_data, chat))
+                asyncio.create_task(self._mass_start(chat))
 
             elif d == "mass_stop":
                 for c in self.config.clones_data:
-                    await self._kill_clone(c.get("name"), chat)
-                await context.bot.send_message(chat, "❄️ Mass Stop done.")
+                    asyncio.create_task(self._stop_clone(c.get("name"), chat))
+                await context.bot.send_message(chat, "❄️ Mass Stop issued.")
 
             elif d.startswith("start_"):
-                await self._launch_clone(d[6:], chat)
+                name = d[6:]
+                asyncio.create_task(self._enqueue_start(name, chat))
 
             elif d.startswith("stop_"):
-                await self._kill_clone(d[5:], chat)
-
-            elif d.startswith("clone_"):
-                # Per-clone sub-menu (uses top-level InlineKeyboard imports)
-                name = d[6:]
-                st = await MonitorEngine.get_clone_status(name)
-                from telegram import InlineKeyboardButton as IKB, InlineKeyboardMarkup as IKM
-                kb = IKM([
-                    [IKB(f"⚡️ Relaunch", callback_data=f"start_{name}"),
-                     IKB(f"❄️ Stop",     callback_data=f"stop_{name}")],
-                    [IKB("📸 Screenshot",  callback_data=f"shot_{name}")],
-                    [IKB("🏠 Back to Hub", callback_data="nav_home")],
-                ])
-                is_active = "🟢 ACTIVE" if ("Offline" not in st and "ERR" not in st) else "🌑 OFFLINE"
-                await context.bot.send_message(
-                    chat,
-                    f"⚙️ *{name.upper()}*\n{is_active}\n`{st}`",
-                    reply_markup=kb,
-                    parse_mode="Markdown"
-                )
+                asyncio.create_task(self._stop_clone(d[5:], chat))
 
             elif d.startswith("shot_"):
                 await self._take_screenshot(q.message)
+
+            elif d.startswith("clone_"):
+                name  = d[6:]
+                state = self.clone_states.get(name, CloneState.STOPPED).value
+                kb    = UIManager.get_clone_submenu(name, state)
+                await context.bot.send_message(
+                    chat,
+                    f"⚙️ *{name.upper()}*\nState: `{state}`",
+                    reply_markup=kb, parse_mode="Markdown"
+                )
 
         except Exception as e:
             logger.error(f"Callback [{d}] error: {e}")
@@ -396,73 +361,142 @@ class AegisBot:
                 pass
 
     # ─────────────────────────────────────────────────────────────────────
-    # Clone logic
+    # STATE MACHINE — Clone startup / stop logic
     # ─────────────────────────────────────────────────────────────────────
-    async def _startup_queue(self, clones: list, chat_id):
+    async def _enqueue_start(self, name: Optional[str], chat_id):
         """
-        Sequential startup manager — 45s gap between each clone.
-        Prevents OS resource starvation on ugPhone/Termux.
+        Acquires the global asyncio.Lock before starting any clone.
+        Guarantees only ONE clone is in STARTING state at a time.
+        After 4/4 completes, waits 300s BEFORE transitioning to RUNNING.
         """
-        total = len(clones)
-        for idx, c in enumerate(clones, 1):
-            name = c.get("name") if isinstance(c, dict) else c
-            if not name:
-                continue
+        if not name: return
+        ci = self.config.get_clone(name)
+        if not ci: return
+
+        # If already starting or running, skip
+        current = self.clone_states.get(name, CloneState.STOPPED)
+        if current == CloneState.STARTING:
+            logger.info(f"_enqueue_start: [{name}] already STARTING. Skip.")
+            return
+
+        async with self._start_lock:
+            # ── STARTING state ──────────────────────────────────────────
+            self.set_state(name, CloneState.STARTING)
+            self.persistence.add_target(name, "RUNNING")
+
+            sm = None
             if chat_id and self.application:
                 try:
-                    await self.application.bot.send_message(
-                        chat_id,
-                        f"🚀 *Queue [{idx}/{total}]*: `{name}` — Запуск...",
+                    sm = await self.application.bot.send_message(
+                        chat_id, f"⏳ `{name}` → STARTING (1/4…)", parse_mode="Markdown")
+                except Exception:
+                    pass
+
+            # ── Run injection (does NOT set RUNNING) ────────────────────
+            ok = await InjectionEngine.inject_and_launch(name, ci.get("cookie"), None, sm)
+            await asyncio.sleep(10)
+            urls = self.config.servers_list
+            await InjectionEngine.inject_and_launch(
+                name, ci.get("cookie"), urls[0] if urls else None, sm)
+
+            if ok is False:
+                # Injection failed
+                self.set_state(name, CloneState.COOLDOWN)
+                logger.error(f"[{name}] Injection failed — COOLDOWN.")
+                return
+
+            # ── 5-MINUTE GRACE PERIOD before RUNNING ────────────────────
+            logger.info(f"[{name}] 4/4 complete. Waiting 300s grace period before RUNNING…")
+            if sm:
+                try:
+                    await sm.edit_text(
+                        f"✅ `{name}` 4/4 complete.\n⏳ *Grace period: 5 min* (Watchdog blind until then…)",
                         parse_mode="Markdown"
                     )
                 except Exception:
                     pass
-            await self._launch_clone(name, chat_id)
-            if idx < total:
-                logger.info(f"StartupQueue: [{name}] done. Waiting 45s before next clone...")
-                await asyncio.sleep(45)  # STRICT 45s between clones
+            await asyncio.sleep(300)
 
-    async def _launch_clone(self, name: Optional[str], chat_id: Optional[int]):
-        if not name:
-            return
-        ci = self.config.get_clone(name)
-        if not ci:
-            return
-        self.persistence.add_target(name)
-        self.active_clones.add(name)
-        sm = None
-        if chat_id and self.application:
-            try:
-                sm = await self.application.bot.send_message(chat_id, f"⏳ `{name}` — Запуск…", parse_mode="Markdown")
-            except Exception:
-                pass
-        await InjectionEngine.inject_and_launch(name, ci.get("cookie"), None, sm)
-        await asyncio.sleep(10)
-        urls = self.config.servers_list
-        await InjectionEngine.inject_and_launch(name, ci.get("cookie"), urls[0] if urls else None, sm)
-        # ── STARTUP GRACE: Watchdog ignores this clone for 300s ─────────
-        self.startup_times[name] = time.time()
-        logger.info(f"_launch_clone: [{name}] grace period started (300s).")
+            # ── Transition to RUNNING ────────────────────────────────────
+            self.set_state(name, CloneState.RUNNING)
+            logger.info(f"[{name}] → RUNNING. Watchdog monitoring begins now.")
+            if sm:
+                try:
+                    await sm.edit_text(f"🟢 `{name}` is *RUNNING*. Watchdog active.", parse_mode="Markdown")
+                except Exception:
+                    pass
+
         await self.refresh_dashboard()
 
-    async def _kill_clone(self, name: Optional[str], chat_id: Optional[int]):
-        if not name:
-            return
+    async def _mass_start(self, chat_id):
+        """Sequential mass start via the _start_lock queue."""
+        clones = self.config.clones_data
+        for idx, c in enumerate(clones, 1):
+            name = c.get("name")
+            if not name: continue
+            if chat_id and self.application:
+                try:
+                    await self.application.bot.send_message(
+                        chat_id,
+                        f"🚀 *Queue [{idx}/{len(clones)}]*: `{name}`",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+            await self._enqueue_start(name, chat_id)
+            # 45s gap between each clone (inside lock releases)
+            if idx < len(clones):
+                await asyncio.sleep(45)
+
+    async def _stop_clone(self, name: Optional[str], chat_id):
+        if not name: return
+        self.set_state(name, CloneState.STOPPED)
         self.persistence.remove_target(name)
-        self.active_clones.discard(name)
         await InjectionEngine.stop(name)
         if chat_id and self.application:
             try:
-                await self.application.bot.send_message(chat_id, f"✅ `{name}` остановлен.", parse_mode="Markdown")
+                await self.application.bot.send_message(
+                    chat_id, f"🌑 `{name}` stopped.", parse_mode="Markdown")
             except Exception:
                 pass
         await self.refresh_dashboard()
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Auto-resume on startup
+    # ─────────────────────────────────────────────────────────────────────
+    async def _auto_resume(self):
+        """
+        Read persistence.target_states, enqueue all clones whose
+        expected state is RUNNING via the sequential startup queue.
+        """
+        await asyncio.sleep(5)
+        targets = [
+            n for n, ts in self.persistence.target_states.items()
+            if ts == "RUNNING"
+        ]
+        if not targets:
+            return
+        admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
+        if admin_id and self.application:
+            try:
+                await self.application.bot.send_message(
+                    admin_id,
+                    f"♻️ *Auto-Resume*\nQueuing: `{', '.join(targets)}`",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+        for n in targets:
+            ci = self.config.get_clone(n)
+            if ci:
+                await self._enqueue_start(n, admin_id)
+                await asyncio.sleep(45)
 
     # ─────────────────────────────────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────────────────────────────────
     async def _toggle_console(self, context, chat_id: int):
-        self._console_on = not getattr(self, "_console_on", False)
+        self._console_on = not self._console_on
         if self._console_on:
             self._streamer    = LogStreamer(context.bot, chat_id)
             self._log_handler = TelegramLogHandler(self._streamer)
@@ -477,12 +511,9 @@ class AegisBot:
                 self._streamer = None
 
     async def _take_screenshot(self, message):
-        """Safe screenshot with absolute path and try-except."""
         buf = "/data/local/tmp/aegis_shot.png"
         try:
-            ret, _, err = await run_bash(
-                f"su -c 'screencap -p {buf} && chmod 644 {buf}'"
-            )
+            ret, _, err = await run_bash(f"su -c 'screencap -p {buf} && chmod 644 {buf}'")
             if ret != 0:
                 await message.reply_text(f"❌ screencap failed: {err}")
                 return
@@ -496,28 +527,21 @@ class AegisBot:
         try:
             if self.application:
                 await self.application.bot.send_message(chat_id, "♻️ Git Sync…")
-            ret, out, err = await run_bash("git -C " + _bot_dir + " pull --rebase 2>&1")
-            result = out or err or "(no output)"
-            # Version check post-sync
-            ver_check = f"\n✅ Local VERSION confirmed: {VERSION}" if VERSION == "3.0" else f"\n⚠️ VERSION MISMATCH: {VERSION}"
+            ret, out, err = await run_bash(f"git -C {_bot_dir} pull --rebase 2>&1")
+            result = (out or err or "(no output)")[:3000]
             if self.application:
-                await self.application.bot.send_message(chat_id, f"```\n{result[:3000]}\n```{ver_check}", parse_mode="Markdown")
+                await self.application.bot.send_message(
+                    chat_id, f"```\n{result}\n```\n✅ VERSION: {VERSION}", parse_mode="Markdown")
         except Exception as e:
             logger.error(f"git_sync error: {e}")
 
-    # ─────────────────────────────────────────────────────────────────────
-    # Global error handler
-    # ─────────────────────────────────────────────────────────────────────
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Unhandled exception: {context.error}", exc_info=context.error)
         admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
         if admin_id:
             try:
                 await context.bot.send_message(
-                    admin_id,
-                    f"🚨 *Global Error*\n`{context.error}`",
-                    parse_mode="Markdown"
-                )
+                    admin_id, f"🚨 *Global Error*\n`{context.error}`", parse_mode="Markdown")
             except Exception:
                 pass
 
@@ -525,55 +549,38 @@ class AegisBot:
     # Entry-point
     # ─────────────────────────────────────────────────────────────────────
     async def run(self):
-        # 1. Kill duplicate python processes
+        # 1. Kill duplicates
         await run_bash(
             f"su -c 'pgrep -f \"python.*main.py\" | grep -v {os.getpid()} | xargs kill -9' 2>/dev/null"
         )
 
         # 2. Build application
         self.application = ApplicationBuilder().token(self.config.bot_token).build()
-
-        # 3. Register handlers
         app = self.application
+
+        # 3. Handlers
         app.add_handler(CommandHandler("start",   self.cmd_start))
         app.add_handler(CommandHandler("console", self.cmd_console))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         app.add_handler(CallbackQueryHandler(self.handle_callback))
-        app.add_error_handler(self.error_handler)  # Global error handler
+        app.add_error_handler(self.error_handler)
 
         # 4. Start
         await app.initialize()
         await app.start()
 
-        # 5. Launch Watchdog with explicit application reference (fix NoneType)
+        # 5. Launch Watchdog (state-gated, uses application explicitly)
         asyncio.create_task(watchdog_loop(app, self))
 
-        # 5b. Auto-resume: relaunch all saved active clones via 45s queue
-        if self.active_clones:
-            async def _auto_resume():
-                await asyncio.sleep(5)  # brief startup delay
-                admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
-                names = ", ".join(sorted(self.active_clones))
-                if admin_id:
-                    try:
-                        await app.bot.send_message(
-                            admin_id,
-                            f"♻️ *Auto-Resume*\n⏳ Запуск `{names}` • 45s между клонам…",
-                            parse_mode="Markdown"
-                        )
-                    except Exception:
-                        pass
-                # Rebuild clones_data list from names
-                clones = [c for c in self.config.clones_data if c.get("name") in self.active_clones]
-                await self._startup_queue(clones, admin_id)
-            asyncio.create_task(_auto_resume())
+        # 6. Auto-resume
+        asyncio.create_task(self._auto_resume())
 
         logger.info(f"💎 PROJECT AEGIS V{VERSION} ONLINE — {DEVICE_ID}")
 
-        # 6. Poll (drop stale messages)
+        # 7. Poll
         await app.updater.start_polling(drop_pending_updates=True)
 
-        # 7. Block forever
+        # 8. Block
         try:
             while True:
                 await asyncio.sleep(3600)

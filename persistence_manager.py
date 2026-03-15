@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
-# persistence_manager.py — Project Aegis V3.0
+# persistence_manager.py — Project Aegis V4.0
 import json
 import os
 import logging
 
 logger = logging.getLogger("PersistenceManager")
 
+
 class PersistenceManager:
     def __init__(self, farm_dir: str):
         self.path = os.path.join(farm_dir, "persistence.json")
 
-        # ── V3.0 ATOMIC INITIALISATION ──────────────────────────────────────
-        self.targets: dict      = {}   # {clone_name: True}  — managed clones
-        self.active_clones: list = []  # [clone_name, …]    — currently running
-        self.auto_restore: bool  = True
-        self.console_mode: bool  = False
+        # ── V4.0 ATOMIC INITIALISATION ──────────────────────────────────────
+        self.targets: dict        = {}   # {clone_name: True}
+        self.active_clones: list  = []   # [clone_name, …]  — expected-running
+        self.target_states: dict  = {}   # {clone_name: "RUNNING"/"STOPPED"}
+        self.auto_restore: bool   = True
+        self.console_mode: bool   = False
         # ────────────────────────────────────────────────────────────────────
 
         self.load()
@@ -29,12 +31,13 @@ class PersistenceManager:
 
             self.auto_restore  = d.get("auto_restore", True)
             self.console_mode  = d.get("console_mode", False)
+            self.target_states = d.get("target_states", {})
 
-            # active_clones: simple list of running clone names
+            # active_clones list
             ac = d.get("active_clones", [])
             self.active_clones = ac if isinstance(ac, list) else []
 
-            # targets: dict migration from legacy list
+            # targets: migrate legacy list → dict
             raw = d.get("targets", d.get("target_clones", []))
             if isinstance(raw, list):
                 self.targets = {n: True for n in raw}
@@ -43,7 +46,7 @@ class PersistenceManager:
             else:
                 self.targets = {}
 
-            # Ensure active_clones and targets are in sync
+            # Sync active_clones → targets
             for n in self.active_clones:
                 if n not in self.targets:
                     self.targets[n] = True
@@ -59,6 +62,7 @@ class PersistenceManager:
                 "console_mode":  self.console_mode,
                 "active_clones": self.active_clones,
                 "targets":       self.targets,
+                "target_states": self.target_states,
                 "target_clones": list(self.targets.keys()),  # legacy compat
             }
             with open(self.path, "w", encoding="utf-8") as f:
@@ -67,14 +71,19 @@ class PersistenceManager:
             logger.error(f"PersistenceManager.save(): {e}")
 
     # ──────────────────────────────────────────────────────────────────────
-    def add_target(self, name: str):
+    def add_target(self, name: str, target_state: str = "RUNNING"):
         self.targets[name] = True
+        self.target_states[name] = target_state
         if name not in self.active_clones:
             self.active_clones.append(name)
         self.save()
 
     def remove_target(self, name: str):
         self.targets.pop(name, None)
+        self.target_states.pop(name, None)
         if name in self.active_clones:
             self.active_clones.remove(name)
         self.save()
+
+    def get_target_state(self, name: str) -> str:
+        return self.target_states.get(name, "STOPPED")

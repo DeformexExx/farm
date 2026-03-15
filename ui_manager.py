@@ -1,7 +1,19 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V3.0 Card UI
+# ui_manager.py — Project Aegis V4.0 Dark Premium
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+
+
+def _fmt_uptime(seconds: float) -> str:
+    """Format elapsed seconds as Xh Ym or Ym Zs."""
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m"
+    if m:
+        return f"{m}m {sec}s"
+    return f"{sec}s"
 
 
 class UIManager:
@@ -10,14 +22,14 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD v3.0* 💎\n"
+            "💎 *AEGIS OVERLORD V4.0*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM: `[💠 ONLINE]`\n"
-            f"📱 DEVICE: `{device_id}`\n"
+            f"⚡️ SYSTEM : `[💠 ONLINE]`\n"
+            f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
 
-    # ── KEYBOARDS ─────────────────────────────────────────────────────────
+    # ── MAIN KEYBOARD ─────────────────────────────────────────────────────
     @staticmethod
     def get_main_keyboard() -> ReplyKeyboardMarkup:
         return ReplyKeyboardMarkup([
@@ -25,14 +37,30 @@ class UIManager:
             [KeyboardButton("⚙️ SYSTEM")],
         ], resize_keyboard=True)
 
+    # ── DEVICE DASHBOARD ──────────────────────────────────────────────────
+    @staticmethod
+    def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
+        return (
+            "💎 *AEGIS V4.0 — DEVICE*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"📱 DEVICE  : `{device_id}`\n"
+            f"🐕 WATCHDOG: `[STATE-GATED 🔒]`\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
+            f"🌡 TEMP: `{temp}`\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "✨ _State Machine Active_"
+        )
+
     @staticmethod
     def get_device_keyboard() -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("♻️ GLOBAL SYNC", callback_data="sys_sync")],
-            [InlineKeyboardButton("🖼 SCREENSHOT",  callback_data="sys_screenshot")],
-            [InlineKeyboardButton("🏠 BACK",        callback_data="nav_home")],
+            [InlineKeyboardButton("♻️ GIT SYNC",   callback_data="sys_sync")],
+            [InlineKeyboardButton("🖼 SCREENSHOT", callback_data="sys_screenshot")],
+            [InlineKeyboardButton("🏠 BACK",       callback_data="nav_home")],
         ])
 
+    # ── SYSTEM ────────────────────────────────────────────────────────────
     @staticmethod
     def get_system_keyboard(console_on: bool, restore_on: bool) -> InlineKeyboardMarkup:
         c = "🟢 ON" if console_on  else "🔴 OFF"
@@ -44,101 +72,104 @@ class UIManager:
             [InlineKeyboardButton("🏠 BACK",               callback_data="nav_home")],
         ])
 
-    # ── DASHBOARD TEXT ─────────────────────────────────────────────────────
+    # ── CLONE HUB TEXT — V4.0 State Machine Cards ─────────────────────────
     @staticmethod
-    def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
-        return (
-            "💎 *PROJECT AEGIS V3.0* 💎\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"📱 DEVICE : `{device_id}`\n"
-            f"🐕 WATCHDOG: `[💠 ACTIVE – Thread Monitor]`\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
-            f"🌡 TEMP: `{temp}`\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "✨ _Industrial Stability Active_"
-        )
-
-    # ── CLONE HUB TEXT (Card System) ──────────────────────────────────────
-    @staticmethod
-    def format_clones_hub(clones_data: list, status_map: dict, targets: dict) -> str:
+    def format_clones_hub(clones_data: list, state_map: dict, uptime_map: dict) -> str:
         """
-        Generates one TEXT block with one card per clone.
-        status_map: {name: "Mem: X | Thr: Y"  or  "Offline"}
-        targets:    {name: True} — names of auto-managed clones
+        state_map:  {clone_name: CloneState (str value)}
+        uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *CLONE HUB V3.0*\n"
+        msg = "💎 *AEGIS OVERLORD V4.0*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
             msg += "_No clones configured._"
             return msg
 
+        import time as _time
+
+        STATE_ICONS = {
+            "STOPPED":  "🌑 STOPPED",
+            "STARTING": "⏳ STARTING",
+            "RUNNING":  "🟢 RUNNING",
+            "COOLDOWN": "🔵 COOLDOWN",
+        }
+
         for clone in clones_data:
-            name = clone.get("name", "Unknown")
-            st   = status_map.get(name, "Offline")
+            name  = clone.get("name", "Unknown")
+            state = state_map.get(name, "STOPPED")
+            icon  = STATE_ICONS.get(state, "❓ UNKNOWN")
 
-            # ── Status icon + thread count ──────────────────────────────
-            if "Offline" in st:
-                icon, thr = "🌑 OFFLINE", "—"
-            elif "ERR" in st or "Error" in st:
-                icon, thr = "⚠️ FAILED", "—"
+            # Uptime
+            ts = uptime_map.get(name)
+            if state == "RUNNING" and ts:
+                uptime = _fmt_uptime(_time.time() - ts)
             else:
-                icon = "🟢 ONLINE"
-                m = re.search(r"Thr:\s*(\d+)", st)
-                thr = m.group(1) if m else "?"
+                uptime = "—"
 
-            # ── Watchdog threshold warning ──────────────────────────────
-            thr_warn = ""
-            if thr.isdigit():
-                t = int(thr)
-                if   t < 130: thr_warn = " ⚠️ FROZEN"
-                elif t > 500: thr_warn = " 🔴 LEAK"
-
-            # ── Sync state ──────────────────────────────────────────────
-            state = "👤 Synced" if name in targets else "🌑 Manual"
+            # Thread info (from status_map, optional)
+            thr_info = state_map.get(f"{name}:threads", "")
+            thr_line = f"🧵 Threads: `{thr_info}`" if thr_info else "🧵 Threads: `—`"
 
             msg += (
-                f"[🎮 *{name.upper()}*] | {icon}\n"
-                f"🧵 Threads: `{thr}`{thr_warn}\n"
-                f"State: {state}\n"
+                f"[🎮 *{name.upper()}*]\n"
+                f"State: {icon}\n"
+                f"{thr_line} | ⏱ Uptime: `{uptime}`\n"
                 "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n"
             )
 
-        return msg
+        return msg.rstrip()
 
     # ── CLONE HUB KEYBOARD ────────────────────────────────────────────────
     @staticmethod
     def get_clones_hub_keyboard(clones_data: list) -> InlineKeyboardMarkup:
         """
         Row 0: [⚡️ Mass Start] [❄️ Mass Stop]
-        Row 1-N: Settings buttons for each clone (⚙️ CloneName) — 2 per row
-        Last row: Back button
+        Rows 1-N: [⚙️ CloneA] [⚙️ CloneB]  (2 per row)
+        Last: [🏠 HOME]
         """
         rows = []
-        # Top: mass controls
         rows.append([
             InlineKeyboardButton("⚡️ Mass Start", callback_data="mass_start"),
             InlineKeyboardButton("❄️ Mass Stop",  callback_data="mass_stop"),
         ])
-        # Settings grid: 2 buttons per row
         names = [c.get("name", "?") for c in clones_data]
         for i in range(0, len(names), 2):
-            row = []
-            for n in names[i:i+2]:
-                row.append(InlineKeyboardButton(f"⚙️ {n.upper()}", callback_data=f"clone_{n}"))
+            row = [
+                InlineKeyboardButton(f"⚙️ {n.upper()}", callback_data=f"clone_{n}")
+                for n in names[i:i+2]
+            ]
             rows.append(row)
         rows.append([InlineKeyboardButton("🏠 HOME", callback_data="nav_home")])
+        return InlineKeyboardMarkup(rows)
+
+    # ── CLONE SUB-MENU ────────────────────────────────────────────────────
+    @staticmethod
+    def get_clone_submenu(name: str, state: str) -> InlineKeyboardMarkup:
+        """Individual clone control keyboard."""
+        rows = []
+        if state in ("STOPPED", "COOLDOWN"):
+            rows.append([InlineKeyboardButton("⚡️ Start",    callback_data=f"start_{name}")])
+        elif state == "RUNNING":
+            rows.append([InlineKeyboardButton("❄️ Stop",     callback_data=f"stop_{name}")])
+            rows.append([InlineKeyboardButton("♻️ Relaunch", callback_data=f"start_{name}")])
+        else:
+            # STARTING — show abort
+            rows.append([InlineKeyboardButton("❌ Abort",    callback_data=f"stop_{name}")])
+        rows.append([InlineKeyboardButton("📸 Screenshot",   callback_data=f"shot_{name}")])
+        rows.append([InlineKeyboardButton("🏠 Back to Hub",  callback_data="nav_home")])
         return InlineKeyboardMarkup(rows)
 
     # ── HELP ──────────────────────────────────────────────────────────────
     @staticmethod
     def get_help_text() -> str:
         return (
-            "🎮 *V3.0 INDUSTRIAL GUIDE*\n\n"
-            "• /start — Dashboard\n"
-            "• /console — Last 10 boot log lines\n"
-            "• Watchdog: auto-restart if Thr < 130\n"
-            "• Single Master: kills duplicate python processes on boot\n"
-            "• Targets saved to `persistence.json`"
+            "🎮 *AEGIS V4.0 GUIDE*\n\n"
+            "State Machine:\n"
+            "  🌑 STOPPED → ⏳ STARTING → 🟢 RUNNING\n"
+            "  🔵 COOLDOWN → re-enters queue\n\n"
+            "• Watchdog is *blind* to non-RUNNING clones\n"
+            "• asyncio.Lock enforces single-clone startup\n"
+            "• 45s sequential gap between clones\n"
+            "• 5-min grace after Step 4/4 before monitoring"
         )
