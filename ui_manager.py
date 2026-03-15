@@ -85,7 +85,7 @@ class UIManager:
         )
 
     @staticmethod
-    def format_clones_hub(clones_data: list, status_map: dict, persistence_targets: list) -> str:
+    def format_clones_hub(clones_data: list, status_map: dict, persistence_targets: dict) -> str:
         """Industrial High-Density Card Blocks - V3.0 Hub"""
         msg = "💎 *CLONE MANAGEMENT HUB V3.0*\n\n"
         msg += "━━━━━━━━━━━━━━━━━━\n"
@@ -93,7 +93,7 @@ class UIManager:
         for clone in clones_data:
             name = clone.get("name", "Unknown")
             raw_status = status_map.get(name, "Offline")
-            is_target = name in persistence_targets
+            is_target = name in persistence_targets # Works for dict (keys)
             
             # Status Indicator
             if "Offline" in raw_status:

@@ -8,7 +8,7 @@ logger = logging.getLogger("PersistenceManager")
 class PersistenceManager:
     def __init__(self, farm_dir: str):
         self.path = os.path.join(farm_dir, "persistence.json")
-        self.targets = [] # EXPLICIT ATTRIBUTE V3.0
+        self.targets = {} # EXPLICIT ATTRIBUTE V3.0 AS DICT
         self.auto_restore = True
         self.console_mode = False
         
@@ -16,7 +16,7 @@ class PersistenceManager:
             "auto_restore": True,
             "console_mode": False,
             "target_clones": [], # Legacy
-            "targets": [] # V3.0
+            "targets": {} # V3.0
         }
         self.load()
 
@@ -29,8 +29,13 @@ class PersistenceManager:
                     # Sync attributes from dictionary
                     self.auto_restore = self.data.get("auto_restore", True)
                     self.console_mode = self.data.get("console_mode", False)
-                    # Sync targets (V3.0 priority)
-                    self.targets = self.data.get("targets", self.data.get("target_clones", []))
+                    
+                    # Sync targets: ensure it is a dict
+                    raw_targets = self.data.get("targets", self.data.get("target_clones", []))
+                    if isinstance(raw_targets, list):
+                        self.targets = {name: True for name in raw_targets}
+                    else:
+                        self.targets = raw_targets if isinstance(raw_targets, dict) else {}
             except Exception as e:
                 logger.error(f"Failed to load persistence: {e}")
 
@@ -40,7 +45,8 @@ class PersistenceManager:
             self.data["auto_restore"] = self.auto_restore
             self.data["console_mode"] = self.console_mode
             self.data["targets"] = self.targets
-            self.data["target_clones"] = self.targets # Keep legacy in sync
+            # Keep legacy list in sync for older versions or other tools
+            self.data["target_clones"] = list(self.targets.keys())
             
             with open(self.path, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, indent=4)
@@ -48,11 +54,10 @@ class PersistenceManager:
             logger.error(f"Failed to save persistence: {e}")
 
     def add_target(self, name: str):
-        if name not in self.targets:
-            self.targets.append(name)
-            self.save()
+        self.targets[name] = True
+        self.save()
 
     def remove_target(self, name: str):
         if name in self.targets:
-            self.targets.remove(name)
+            del self.targets[name]
             self.save()
