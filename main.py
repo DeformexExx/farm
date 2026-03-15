@@ -152,19 +152,23 @@ class AegisNebulaBot:
         await update.message.reply_text(text, reply_markup=UIManager.get_device_keyboard(), parse_mode='Markdown')
 
     async def send_clones_menu(self, update: Update):
-        self.config.reload()
-        status_map = {}
-        for clone in self.config.clones_data:
-            name = clone.get("name")
-            if name:
-                status_map[name] = await MonitorEngine.get_clone_status(name)
-        
-        text = UIManager.format_clones_hub(self.config.clones_data, status_map, self.persistence.targets)
-        self._dashboard_msg = await update.message.reply_text(
-            text, 
-            reply_markup=UIManager.get_clones_hub_keyboard(self.config.clones_data), 
-            parse_mode='Markdown'
-        )
+        try:
+            self.config.reload()
+            status_map = {}
+            for clone in self.config.clones_data:
+                name = clone.get("name")
+                if name:
+                    status_map[name] = await MonitorEngine.get_clone_status(name)
+            
+            text = UIManager.format_clones_hub(self.config.clones_data, status_map, self.persistence.targets)
+            self._dashboard_msg = await update.message.reply_text(
+                text, 
+                reply_markup=UIManager.get_clones_hub_keyboard(self.config.clones_data), 
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Error rendering Clones Menu: {e}")
+            await update.message.reply_text(f"❌ Ошибка при отрисовке меню: {e}")
 
     async def send_system_menu(self, update: Update):
         text = "⚙️ *SYSTEM SETTINGS*"
@@ -208,16 +212,17 @@ class AegisNebulaBot:
         if not self._dashboard_msg:
             return
             
-        status_map = {}
-        for clone in self.config.clones_data:
-            name = clone.get("name")
-            if name:
-                status_map[name] = await MonitorEngine.get_clone_status(name)
-        
-        text = UIManager.format_clones_hub(self.config.clones_data, status_map, self.persistence.targets)
-        keyboard = UIManager.get_clones_hub_keyboard(self.config.clones_data)
-        
         try:
+            self.config.reload()
+            status_map = {}
+            for clone in self.config.clones_data:
+                name = clone.get("name")
+                if name:
+                    status_map[name] = await MonitorEngine.get_clone_status(name)
+            
+            text = UIManager.format_clones_hub(self.config.clones_data, status_map, self.persistence.targets)
+            keyboard = UIManager.get_clones_hub_keyboard(self.config.clones_data)
+            
             await self._dashboard_msg.edit_text(text, reply_markup=keyboard, parse_mode='Markdown')
         except Exception as e:
             logger.debug(f"Dashboard update skipped: {e}")

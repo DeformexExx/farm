@@ -53,6 +53,11 @@ class PersistenceManager:
         val = self.data.get("target_clones", [])
         return val if isinstance(val, list) else []
 
+    @property
+    def targets(self) -> list:
+        """Alias for target_clones (V3.0 Compatibility)"""
+        return self.target_clones
+
     def add_target(self, name: str):
         clones = self.target_clones
         if name not in clones:
