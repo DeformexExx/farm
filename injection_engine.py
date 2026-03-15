@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
+import sqlite3
+import os
 from bash_utils import run_bash
 
 logger = logging.getLogger("InjectionEngine")
@@ -28,17 +30,39 @@ class InjectionEngine:
             await asyncio.sleep(1)
 
             # 2. SQLite Injection
-            await update_status(f"⏳ ({clone_name}) 2/4: Инъекция Cookie...")
+            await update_status(f"⏳ ({clone_name}) 2/4: Инъекция Cookie (Python)...")
             db_path = f"/data/data/com.roblox.{clone_name}/app_webview/Default/Cookies"
-            sql_del = "DELETE FROM cookies;"
-            sql_ins = f"INSERT INTO cookies (host_key, name, value, path, expires_utc, is_secure, is_httponly, has_expires, is_persistent, samesite, source_port) VALUES ('.roblox.com', '.ROBLOSECURITY', '{cookie}', '/', 253402300799000000, 1, 1, 1, 1, -1, -1);"
+            local_db = f"/data/local/tmp/cookies_{clone_name}.db"
             
-            inj_cmd = f"su -c \"sqlite3 {db_path} \\\"{sql_del} {sql_ins}\\\"\""
-            ret, stdout, stderr = await run_bash(inj_cmd)
-            
+            # Копируем файл базы из закрытой директории и даем права
+            copy_out_cmd = f"su -c 'cp {db_path} {local_db} && chmod 777 {local_db}'"
+            ret, stdout, stderr = await run_bash(copy_out_cmd)
             if ret != 0:
-                await update_status(f"❌ SQLite Ошибка ({clone_name}):\n{stderr}")
+                await update_status(f"❌ Ошибка копирования БД ({clone_name}):\n{stderr}")
                 return False
+
+            # Открываем БД локально средствами Python
+            try:
+                conn = sqlite3.connect(local_db)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM cookies;")
+                cursor.execute(f"INSERT INTO cookies (host_key, name, value, path, expires_utc, is_secure, is_httponly, has_expires, is_persistent, samesite, source_port) VALUES ('.roblox.com', '.ROBLOSECURITY', '{cookie}', '/', 253402300799000000, 1, 1, 1, 1, -1, -1);")
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                await update_status(f"❌ Ошибка SQLite Python ({clone_name}):\n{e}")
+                return False
+
+            # Возвращаем модифицированный файл обратно
+            copy_in_cmd = f"su -c 'cp {local_db} {db_path}'"
+            ret, stdout, stderr = await run_bash(copy_in_cmd)
+            if ret != 0:
+                await update_status(f"❌ Ошибка возврата БД ({clone_name}):\n{stderr}")
+                return False
+                
+            # Удаляем временный файл
+            if os.path.exists(local_db):
+                os.remove(local_db)
 
             # 3. Permissions Fix (CRITICAL)
             await update_status(f"⏳ ({clone_name}) 3/4: Восстановление прав...")
