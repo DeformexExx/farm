@@ -3,6 +3,18 @@ from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, 
 
 class UIManager:
     @staticmethod
+    def get_welcome_text(device_id: str) -> str:
+        """Premium Liquid Glass Header"""
+        return (
+            f"💎 *AEGIS OVERLORD v2.0* 💎\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"⚡️ *SYSTEM STATUS:* [💠 ONLINE]\n"
+            f"📱 *ACTIVE DEVICE:* `{device_id}`\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"Добро пожаловать в панель управления. Выберите раздел ниже:"
+        )
+
+    @staticmethod
     def get_main_keyboard() -> ReplyKeyboardMarkup:
         """Dashboard Main Menu"""
         keyboard = [

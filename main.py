@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+
+# Get the absolute path of the directory where main.py is located
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Change the current working directory to the script's directory
+os.chdir(script_dir)
+# Add this directory to sys.path so imports always work
+sys.path.append(script_dir)
+
 import asyncio
 import logging
 import time
@@ -20,10 +28,10 @@ if len(sys.argv) < 2:
     sys.exit(1)
 
 DEVICE_ID = sys.argv[1]
-HOME_DIR = os.path.expanduser("~")
-FARM_DIR = os.path.join(HOME_DIR, "farm")
+FARM_DIR = os.path.join(os.path.expanduser("~"), "farm")
 if not os.path.exists(FARM_DIR):
-    FARM_DIR = os.getcwd()  # Fallback
+    # If not in home, check if it's in the script directory itself or current dir
+    FARM_DIR = script_dir 
 
 SCREENSHOT_PATH = "/data/local/tmp/s.png"
 
@@ -188,25 +196,6 @@ class AegisNebulaBot:
         else:
             await update.message.reply_text(msg, parse_mode='Markdown')
 
-    async def send_dashboard(self, update: Update):
-        """Создает и отправляет новое сообщение дашборда"""
-        self.config.reload()
-        ram, cpu, temp = await MonitorEngine.get_system_stats()
-        
-        status_map = {}
-        for clone in self.config.clones_data:
-            name = clone.get("name")
-            if name:
-                status_map[name] = await MonitorEngine.get_clone_status(name)
-        
-        msg_text = UIManager.format_dashboard(
-            self.device_id, ram, cpu, temp, self.config.clones_data, status_map
-        )
-        keyboard = UIManager.get_clone_inline_keyboard(self.config.clones_data, None)
-        
-        self._dashboard_msg = await update.message.reply_text(
-            msg_text, reply_markup=keyboard, parse_mode='Markdown'
-        )
 
     async def update_dashboard(self):
         """Updates the last sent clones menu if it exists."""
