@@ -34,35 +34,41 @@ class InjectionEngine:
             db_path = f"/data/data/com.roblox.{clone_name}/app_webview/Default/Cookies"
             local_db = f"/data/local/tmp/cookies_{clone_name}.db"
             
-            # Копируем файл базы из закрытой директории и даем права
-            copy_out_cmd = f"su -c 'cp {db_path} {local_db} && chmod 777 {local_db}'"
-            ret, stdout, stderr = await run_bash(copy_out_cmd)
+            # 1. Копируем файл из системной директории
+            ret, stdout, stderr = await run_bash(f"su -c 'cp {db_path} {local_db}'")
             if ret != 0:
                 await update_status(f"❌ Ошибка копирования БД ({clone_name}):\n{stderr}")
                 return False
 
-            # Открываем БД локально средствами Python
+            # 2. Даем полные права, чтобы Python (не root) мог писать в файл
+            await run_bash(f"su -c 'chmod 777 {local_db}'")
+
+            # 3. Модифицируем БД средствами Python sqlite3
             try:
                 conn = sqlite3.connect(local_db)
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM cookies;")
-                cursor.execute(f"INSERT INTO cookies (host_key, name, value, path, expires_utc, is_secure, is_httponly, has_expires, is_persistent, samesite, source_port) VALUES ('.roblox.com', '.ROBLOSECURITY', '{cookie}', '/', 253402300799000000, 1, 1, 1, 1, -1, -1);")
+                cursor.execute(
+                    "INSERT INTO cookies (host_key, name, value, path, expires_utc, is_secure, is_httponly, has_expires, is_persistent, samesite, source_port) "
+                    "VALUES ('.roblox.com', '.ROBLOSECURITY', ?, '/', 253402300799000000, 1, 1, 1, 1, -1, -1);",
+                    (cookie,)
+                )
                 conn.commit()
                 conn.close()
             except Exception as e:
                 await update_status(f"❌ Ошибка SQLite Python ({clone_name}):\n{e}")
+                # Удаляем временный файл через su на случай ошибки
+                await run_bash(f"su -c 'rm {local_db}'")
                 return False
 
-            # Возвращаем модифицированный файл обратно
-            copy_in_cmd = f"su -c 'cp {local_db} {db_path}'"
-            ret, stdout, stderr = await run_bash(copy_in_cmd)
+            # 4. Копируем обратно в системную директорию
+            ret, stdout, stderr = await run_bash(f"su -c 'cp {local_db} {db_path}'")
             if ret != 0:
                 await update_status(f"❌ Ошибка возврата БД ({clone_name}):\n{stderr}")
                 return False
                 
             # Удаляем временный файл
-            if os.path.exists(local_db):
-                os.remove(local_db)
+            await run_bash(f"su -c 'rm {local_db}'")
 
             # 3. Permissions Fix (CRITICAL)
             await update_status(f"⏳ ({clone_name}) 3/4: Восстановление прав...")

@@ -102,10 +102,11 @@ class AegisNebulaBot:
         )
         keyboard = UIManager.get_clone_inline_keyboard(self.config.clones_data, None)
         
-        try:
-            await self._dashboard_msg.edit_text(msg_text, reply_markup=keyboard, parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Failed to update dashboard: {e}")
+        if self._dashboard_msg:
+            try:
+                await self._dashboard_msg.edit_text(msg_text, reply_markup=keyboard, parse_mode='Markdown')
+            except Exception as e:
+                logger.error(f"Failed to update dashboard: {e}")
 
     async def sync_git(self, update: Update):
         msg = await update.message.reply_text("⏳ Ожидание Git...")
