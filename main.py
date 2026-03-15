@@ -2,12 +2,10 @@
 import os
 import sys
 
-# Get the absolute path of the directory where main.py is located
-script_dir = os.path.dirname(os.path.abspath(__file__))
-# Change the current working directory to the script's directory
-os.chdir(script_dir)
-# Add this directory to sys.path so imports always work
-sys.path.append(script_dir)
+# AEGIS V2.2: Absolute Path Fix (CRITICAL)
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.getcwd())
+script_dir = os.getcwd()
 
 import asyncio
 import logging
@@ -276,13 +274,17 @@ class AegisNebulaBot:
             elif data == "mass_start":
                 clones = self.config.clones_data
                 count = len(clones)
-                await context.bot.send_message(chat_id=query.message.chat_id, text=f"🚀 Начинаю массовый запуск {count} клонов...")
+                await context.bot.send_message(chat_id=query.message.chat_id, text=f"🚀 Начинаю массовый запуск {count} клонов (Smart Conveyor V2.2)...")
+                
+                # Pre-Flight: Cache Drop
+                await run_bash("su -c 'sync; echo 3 > /proc/sys/vm/drop_caches'")
+                await asyncio.sleep(2)
+
                 for clone_info in clones:
                     name = clone_info.get("name")
                     if name:
-                        await self._start_clone_logic(name, query.message.chat_id, context)
-                        await asyncio.sleep(3)
-                        await context.bot.send_message(chat_id=query.message.chat_id, text=f"⏳ [{name}] запущен, готовлю следующий...")
+                        # Logic: Start APK -> 15s -> Join Intent -> 10s -> Next
+                        await self._start_clone_logic_v22(name, query.message.chat_id, context)
                 await context.bot.send_message(chat_id=query.message.chat_id, text="✅ Массовый запуск завершен!")
 
             elif data == "mass_stop":
@@ -320,25 +322,46 @@ class AegisNebulaBot:
             await context.bot.send_message(chat_id=query.message.chat_id, text=f"❌ КРИТИЧЕСКАЯ ОШИБКА PYTHON: {e}")
 
 
-    async def _start_clone_logic(self, clone_name, chat_id, context):
+    async def _start_clone_logic_v22(self, clone_name, chat_id, context):
+        """Smart Conveyor V2.2: 15s/10s intervals for cloud stability"""
         clone_info = self.config.get_clone(clone_name)
         if not clone_info or not clone_info.get("cookie"):
-            await context.bot.send_message(chat_id=chat_id, text=f"❌ Ошибка: Конфиг для {clone_name} не найден.")
+            if chat_id: await context.bot.send_message(chat_id=chat_id, text=f"❌ Ошибка: Конфиг для {clone_name} не найден.")
             return
 
         self.persistence.add_target(clone_name)
+        self.active_clones.add(clone_name)
+        
+        # 1. Start APK (Awaken) - Without Join link first
+        if chat_id: status_msg = await context.bot.send_message(chat_id=chat_id, text=f"⏳ [{clone_name}] 1/2: Запуск APK...")
+        else: status_msg = None
+        
+        success = await InjectionEngine.inject_and_launch(clone_name, clone_info.get("cookie"), None, status_msg)
+        
+        if not success:
+            self.active_clones.discard(clone_name)
+            return
+
+        # 2. Wait 15 Seconds (Conveyor)
+        await asyncio.sleep(15)
+        
+        # 3. Join Intent (Strike)
+        if status_msg: await status_msg.edit_text(f"⏳ [{clone_name}] 2/2: Вход на сервер...")
+        
         clones_list = [c.get("name") for c in self.config.clones_data]
-        try:
-            idx = clones_list.index(clone_name)
-        except ValueError:
-            idx = 0
+        try: idx = clones_list.index(clone_name)
+        except ValueError: idx = 0
         
         servers_list = self.config.servers_list
         url = servers_list[idx] if idx < len(servers_list) else (servers_list[0] if servers_list else None)
         
-        self.active_clones.add(clone_name)
-        status_msg = await context.bot.send_message(chat_id=chat_id, text=f"🎮 Запуск {clone_name}...")
-        asyncio.create_task(self._run_injection(clone_name, clone_info, url, status_msg))
+        await InjectionEngine.inject_and_launch(clone_name, clone_info.get("cookie"), url, status_msg)
+        
+        # 4. Final Breathe cool down before allowing next clone
+        await asyncio.sleep(10)
+
+    async def _start_clone_logic(self, clone_name, chat_id, context):
+        await self._start_clone_logic_v22(clone_name, chat_id, context)
 
     async def _stop_clone_logic(self, clone_name, chat_id, context):
         self.active_clones.discard(clone_name)
@@ -347,6 +370,7 @@ class AegisNebulaBot:
         await self.update_dashboard()
 
     async def _run_injection(self, clone_name, clone_info, server_url, status_msg):
+        """Internal helper for InjectionEngine call."""
         success = await InjectionEngine.inject_and_launch(
             clone_name, 
             clone_info.get("cookie"), 
@@ -358,7 +382,7 @@ class AegisNebulaBot:
         await self.update_dashboard()
 
     async def watchdog_task(self):
-        """Smart Watchdog 2.0: 20s validation, Anti-Loop (3 fails), Auto-Cleanup."""
+        """Smart Watchdog 2.1: Thread-Based Monitoring (< 130 threshold)"""
         fail_counts = {}
         last_cleanup = 0.0
         
@@ -379,19 +403,46 @@ class AegisNebulaBot:
                     await run_bash("su -c 'logcat -c'") # Clear logs
                     last_cleanup = now
 
-                clones_list = [c.get("name") for c in self.config.clones_data]
-                servers_list = self.config.servers_list
-
                 for name in list(self.active_clones):
-                    status = await MonitorEngine.get_clone_status(name)
+                    raw_status = await MonitorEngine.get_clone_status(name)
                     
-                    if status == "Offline":
+                    is_stuck = False
+                    reason = ""
+                    
+                    if "Thr:" in raw_status:
+                        try:
+                            thr_str = raw_status.split("Thr:")[1].split("|")[0].strip()
+                            if thr_str.isdigit():
+                                thr_count = int(thr_str)
+                                if thr_count < 130:
+                                    is_stuck = True
+                                    reason = f"завис ({thr_count} потоков)"
+                                elif thr_count > 500:
+                                    is_stuck = True
+                                    reason = f"утечка ({thr_count} потоков)"
+                        except Exception as e:
+                            logger.error(f"Watchdog parse error for {name}: {e}")
+                    
+                    elif "Offline" in raw_status:
+                        is_stuck = True
+                        reason = "Offline"
+
+                    if is_stuck:
                         # SMART VALIDATION: Wait 20s and check again
-                        logger.warning(f"Watchdog: {name} might be dead. Double-checking in 20s...")
+                        logger.warning(f"Watchdog: {name} is {reason}. Double-checking in 20s...")
                         await asyncio.sleep(20)
-                        status_retry = await MonitorEngine.get_clone_status(name)
+                        raw_retry = await MonitorEngine.get_clone_status(name)
                         
-                        if status_retry == "Offline":
+                        still_stuck = False
+                        if "Thr:" in raw_retry:
+                            # Re-check threads
+                            t_str = raw_retry.split("Thr:")[1].split("|")[0].strip()
+                            if t_str.isdigit() and int(t_str) < 130:
+                                still_stuck = True
+                        elif "Offline" in raw_retry:
+                            still_stuck = True
+
+                        if still_stuck:
                             # ANTI-LOOP: Track fails
                             fail_counts[name] = fail_counts.get(name, 0) + 1
                             if fail_counts[name] > 3:
@@ -402,13 +453,9 @@ class AegisNebulaBot:
                                     except: pass
                                 continue
 
-                            logger.warning(f"Watchdog: {name} is DEAD. Restarting ({fail_counts[name]}/3)...")
-                            clone_info = self.config.get_clone(name)
-                            if clone_info and clone_info.get("cookie"):
-                                try: idx = clones_list.index(name)
-                                except: idx = 0
-                                url = servers_list[idx] if len(servers_list) > idx else (servers_list[0] if servers_list else None)
-                                await InjectionEngine.inject_and_launch(name, clone_info.get("cookie"), url, None)
+                            logger.warning(f"Watchdog: {name} RESTARTING ({fail_counts[name]}/3) - Reason: {reason}")
+                            await self._stop_clone_logic(name, 0, context=None)
+                            await self._start_clone_logic_v22(name, 0, context=None)
                         else:
                             logger.info(f"Watchdog: {name} recovered by itself.")
                     else:
@@ -430,16 +477,14 @@ class AegisNebulaBot:
         self.application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_text))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         
-        # Start Watchdog Task
+        # Startup and Watchdog Task
         loop = asyncio.get_event_loop()
+        # Single Master Policy Enforcement on boot
+        loop.create_task(run_bash("pkill -9 -f 'python main.py'"))
         loop.create_task(self.watchdog_task())
-        
-        # Run Sanity Check on startup
         loop.create_task(self.sanity_check())
         
-        logger.info(f"PROJECT AEGIS V2.0 started for {self.device_id}")
-        
-        # run_polling allows dropping pending updates, useful for preventing 'terminated by other getUpdates'
+        logger.info(f"PROJECT AEGIS V2.2 started for {self.device_id}")
         self.application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":

@@ -80,35 +80,39 @@ class UIManager:
 
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
-        """Home Dashboard Text"""
+        """Home Dashboard Text - V2.2"""
         return (
-            f"💎 *PROJECT AEGIS V2.0* 💎\n"
+            f"💎 *PROJECT AEGIS V2.2* 💎\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"📱 *DEVICE:* `{device_id}`\n"
+            f"🐕 *WATCHDOG:* [💠 ACTIVE (THR)]\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
             f"🧠 *RAM:* `{ram}` | 🚀 *CPU:* `{cpu}`\n"
             f"🌡 *TEMP:* `{temp}`\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"✨ _System Status: Optimal_"
+            f"✨ _System Status: Stable_"
         )
 
     @staticmethod
     def format_clones_list(clones_data: list, status_map: dict) -> str:
-        """Clones Center Text"""
+        """Clones Center Text with Threads - V2.1"""
         msg = "🤖 *CLONE CENTER*\n━━━━━━━━━━━━━━━━━━\n"
         for clone in clones_data:
             name = clone.get("name", "Unknown")
             raw_status = status_map.get(name, "Offline")
             
             if "Offline" in raw_status:
-                indicator = "🌑 [OFFLINE]"
+                indicator = "🌑 [OFF]"
+                detail = ""
             elif "Error" in raw_status:
-                indicator = "⚠️ [ERROR]"
+                indicator = "⚠️ [ERR]"
+                detail = f"\n└─ _{raw_status}_"
             else:
-                indicator = "💠 [ONLINE]"
+                indicator = "💠 [ON]"
+                # raw_status might be 'Mem: 450MB | Thr: 165'
+                detail = f"\n└─ _{raw_status}_"
                 
-            msg += f"{indicator} `{name.upper()}`\n"
-            if indicator == "💠 [ONLINE]":
-                msg += f"└─ _{raw_status}_\n"
+            msg += f"{indicator} `{name.upper()}`{detail}\n"
                 
         msg += "━━━━━━━━━━━━━━━━━━"
         return msg
