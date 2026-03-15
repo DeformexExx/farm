@@ -35,7 +35,7 @@ class UIManager:
 
     @staticmethod
     def get_clones_hub_keyboard(clones_data) -> InlineKeyboardMarkup:
-        """Sequential grid of controls for every clone card + Mass Controls"""
+        """Industrial High-Density Controls - V3.0 Hub"""
         keyboard = []
         # Mass Controls Block
         keyboard.append([
@@ -44,7 +44,7 @@ class UIManager:
         ])
         
         # Inline Controls per Clone Card
-        # Layout: [⚡️ Relaunch NAME] [❄️ Stop NAME]
+        # Strictly [⚡️ RE] and [❄️ STOP] to save space
         for clone in clones_data:
             name = clone.get("name", "Unknown")
             keyboard.append([
@@ -54,8 +54,6 @@ class UIManager:
             
         keyboard.append([InlineKeyboardButton("🏠 BACK TO HOME", callback_data="nav_home")])
         return InlineKeyboardMarkup(keyboard)
-
-
 
     @staticmethod
     def get_system_keyboard(console_on: bool, restore_on: bool) -> InlineKeyboardMarkup:
@@ -121,8 +119,6 @@ class UIManager:
             msg += "━━━━━━━━━━━━━━━━━━\n"
                 
         return msg
-
-
 
     @staticmethod
     def get_help_page(page: int) -> str:
