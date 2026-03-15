@@ -81,23 +81,25 @@ class InjectionEngine:
                 await asyncio.sleep(3)
                 
                 # Step C: Send the Join Intent
-                if "code=" in place_id:
-                    # Parse Share Link
-                    try:
-                        import urllib.parse
-                        parsed_url = urllib.parse.urlparse(place_id)
-                        share_code = urllib.parse.parse_qs(parsed_url.query).get('code', [None])[0]
-                        if not share_code:
-                            share_code = place_id.split('code=')[1].split('&')[0]
-                        
-                        # Use -W flag to wait for intent delivery
-                        join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"roblox://navigation/share_links?code={share_code}&type=Server\" com.roblox.{clone_name}'"
-                        await run_bash(join_cmd)
-                    except Exception as e:
-                        logger.error(f"Failed to parse share code: {e}")
+                import re
+                share_code = None
+                
+                # Try regex extraction for code
+                match = re.search(r"code=([a-zA-Z0-9]+)", place_id)
+                if match:
+                    share_code = match.group(1)
+                
+                if share_code:
+                    # Use -W flag to wait for intent delivery
+                    join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"roblox://navigation/share_links?code={share_code}&type=Server\" com.roblox.{clone_name}'"
+                    await run_bash(join_cmd)
                 else:
-                    # Standard PlaceID Intent
-                    join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"roblox://placeId={place_id}\" com.roblox.{clone_name}'"
+                    # Fallback to standard PlaceID Intent or direct URL
+                    if place_id.isdigit():
+                        join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"roblox://placeId={place_id}\" com.roblox.{clone_name}'"
+                    else:
+                        # Direct intent if it's already a roblox:// link
+                        join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"{place_id}\" com.roblox.{clone_name}'"
                     await run_bash(join_cmd)
                 
             await update_status(f"✅ Запущено ({clone_name})")
