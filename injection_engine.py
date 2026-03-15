@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
+import time
 from bash_utils import run_bash
 
 logger = logging.getLogger("InjectionEngine")
@@ -33,10 +34,20 @@ class InjectionEngine:
             sqlite_bin = "/data/data/com.termux/files/usr/bin/sqlite3"
             db_path = f"/data/data/com.roblox.{clone_name}/app_webview/Default/Cookies"
             
+            # Calculate Timestamp in microseconds
+            current_time = int(time.time() * 1000000)
+            
             sql_del = "DELETE FROM cookies;"
             sql_ins = (
-                f"INSERT INTO cookies (host_key, name, value, path, expires_utc, is_secure, is_httponly, has_expires, is_persistent, samesite, source_port) "
-                f"VALUES ('.roblox.com', '.ROBLOSECURITY', '{cookie}', '/', 253402300799000000, 1, 1, 1, 1, -1, -1);"
+                f"INSERT INTO cookies ("
+                f"creation_utc, host_key, top_frame_site_key, name, value, "
+                f"path, expires_utc, is_secure, is_httponly, last_access_utc, "
+                f"has_expires, is_persistent, samesite, source_port, last_update_utc"
+                f") VALUES ("
+                f"{current_time}, '.roblox.com', '', '.ROBLOSECURITY', '{cookie}', "
+                f"'/', 253402300799000000, 1, 1, {current_time}, "
+                f"1, 1, -1, -1, {current_time}"
+                f");"
             )
             
             # Form the full su command with escaped quotes for sqlite
