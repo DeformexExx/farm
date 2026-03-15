@@ -348,9 +348,12 @@ class AegisBot:
                 await q.message.reply_text(UIManager.get_help_text(), parse_mode="Markdown")
 
             elif d == "mass_start":
-                await context.bot.send_message(chat, "🚀 Mass Start…")
-                for c in self.config.clones_data:
-                    await self._launch_clone(c.get("name"), chat)
+                await context.bot.send_message(
+                    chat,
+                    f"🚀 *Startup Queue Active*\n⏳ Clones will launch one every 45s to avoid OS overload.",
+                    parse_mode="Markdown"
+                )
+                asyncio.create_task(self._startup_queue(self.config.clones_data, chat))
 
             elif d == "mass_stop":
                 for c in self.config.clones_data:
@@ -364,23 +367,26 @@ class AegisBot:
                 await self._kill_clone(d[5:], chat)
 
             elif d.startswith("clone_"):
-                # Per-clone sub-menu
+                # Per-clone sub-menu (uses top-level InlineKeyboard imports)
                 name = d[6:]
                 st = await MonitorEngine.get_clone_status(name)
-                is_on = name in self.active_clones
-                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton(f"⚡️ Relaunch {name}", callback_data=f"start_{name}"),
-                     InlineKeyboardButton(f"❄️ Stop {name}",     callback_data=f"stop_{name}")],
-                    [InlineKeyboardButton("🏠 Back to Hub", callback_data="nav_home")],
+                from telegram import InlineKeyboardButton as IKB, InlineKeyboardMarkup as IKM
+                kb = IKM([
+                    [IKB(f"⚡️ Relaunch", callback_data=f"start_{name}"),
+                     IKB(f"❄️ Stop",     callback_data=f"stop_{name}")],
+                    [IKB("📸 Screenshot",  callback_data=f"shot_{name}")],
+                    [IKB("🏠 Back to Hub", callback_data="nav_home")],
                 ])
-                is_active = "🟢" if "Online" in st or "Mem:" in st else "🌑"
+                is_active = "🟢 ACTIVE" if ("Offline" not in st and "ERR" not in st) else "🌑 OFFLINE"
                 await context.bot.send_message(
                     chat,
-                    f"⚙️ *{name.upper()} Controls*\n{is_active} Status: `{st}`",
+                    f"⚙️ *{name.upper()}*\n{is_active}\n`{st}`",
                     reply_markup=kb,
                     parse_mode="Markdown"
                 )
+
+            elif d.startswith("shot_"):
+                await self._take_screenshot(q.message)
 
         except Exception as e:
             logger.error(f"Callback [{d}] error: {e}")
@@ -392,6 +398,30 @@ class AegisBot:
     # ─────────────────────────────────────────────────────────────────────
     # Clone logic
     # ─────────────────────────────────────────────────────────────────────
+    async def _startup_queue(self, clones: list, chat_id):
+        """
+        Sequential startup manager — 45s gap between each clone.
+        Prevents OS resource starvation on ugPhone/Termux.
+        """
+        total = len(clones)
+        for idx, c in enumerate(clones, 1):
+            name = c.get("name") if isinstance(c, dict) else c
+            if not name:
+                continue
+            if chat_id and self.application:
+                try:
+                    await self.application.bot.send_message(
+                        chat_id,
+                        f"🚀 *Queue [{idx}/{total}]*: `{name}` — Запуск...",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+            await self._launch_clone(name, chat_id)
+            if idx < total:
+                logger.info(f"StartupQueue: [{name}] done. Waiting 45s before next clone...")
+                await asyncio.sleep(45)  # STRICT 45s between clones
+
     async def _launch_clone(self, name: Optional[str], chat_id: Optional[int]):
         if not name:
             return
@@ -518,19 +548,24 @@ class AegisBot:
         # 5. Launch Watchdog with explicit application reference (fix NoneType)
         asyncio.create_task(watchdog_loop(app, self))
 
-        # 5b. Auto-resume: relaunch all saved active clones after 5s
+        # 5b. Auto-resume: relaunch all saved active clones via 45s queue
         if self.active_clones:
             async def _auto_resume():
-                await asyncio.sleep(5)
+                await asyncio.sleep(5)  # brief startup delay
                 admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
+                names = ", ".join(sorted(self.active_clones))
                 if admin_id:
-                    names = ", ".join(sorted(self.active_clones))
                     try:
-                        await app.bot.send_message(admin_id, f"♻️ Auto-resume: запускаю `{names}`…", parse_mode="Markdown")
+                        await app.bot.send_message(
+                            admin_id,
+                            f"♻️ *Auto-Resume*\n⏳ Запуск `{names}` • 45s между клонам…",
+                            parse_mode="Markdown"
+                        )
                     except Exception:
                         pass
-                for n in list(self.active_clones):
-                    await self._launch_clone(n, admin_id)
+                # Rebuild clones_data list from names
+                clones = [c for c in self.config.clones_data if c.get("name") in self.active_clones]
+                await self._startup_queue(clones, admin_id)
             asyncio.create_task(_auto_resume())
 
         logger.info(f"💎 PROJECT AEGIS V{VERSION} ONLINE — {DEVICE_ID}")

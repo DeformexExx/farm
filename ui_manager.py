@@ -111,23 +111,23 @@ class UIManager:
     @staticmethod
     def get_clones_hub_keyboard(clones_data: list) -> InlineKeyboardMarkup:
         """
-        Top row: MASS controls.
-        One row per clone: [⚡️ Relaunch] [❄️ Stop]
-        Bottom row: back.
+        Row 0: [⚡️ Mass Start] [❄️ Mass Stop]
+        Row 1-N: Settings buttons for each clone (⚙️ CloneName) — 2 per row
+        Last row: Back button
         """
         rows = []
-        # Mass controls
+        # Top: mass controls
         rows.append([
-            InlineKeyboardButton("⚡️ MASS START", callback_data="mass_start"),
-            InlineKeyboardButton("❄️ MASS STOP",  callback_data="mass_stop"),
+            InlineKeyboardButton("⚡️ Mass Start", callback_data="mass_start"),
+            InlineKeyboardButton("❄️ Mass Stop",  callback_data="mass_stop"),
         ])
-        # Per-clone controls
-        for clone in clones_data:
-            n = clone.get("name", "?")
-            rows.append([
-                InlineKeyboardButton(f"⚡️ {n.upper()}", callback_data=f"start_{n}"),
-                InlineKeyboardButton(f"❄️ {n.upper()}", callback_data=f"stop_{n}"),
-            ])
+        # Settings grid: 2 buttons per row
+        names = [c.get("name", "?") for c in clones_data]
+        for i in range(0, len(names), 2):
+            row = []
+            for n in names[i:i+2]:
+                row.append(InlineKeyboardButton(f"⚙️ {n.upper()}", callback_data=f"clone_{n}"))
+            rows.append(row)
         rows.append([InlineKeyboardButton("🏠 HOME", callback_data="nav_home")])
         return InlineKeyboardMarkup(rows)
 
