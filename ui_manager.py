@@ -73,9 +73,9 @@ class UIManager:
 
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
-        """Home Dashboard Text - V2.2"""
+        """Home Dashboard Text - V3.0"""
         return (
-            f"💎 *PROJECT AEGIS V2.2* 💎\n"
+            f"💎 *PROJECT AEGIS V3.0* 💎\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"📱 *DEVICE:* `{device_id}`\n"
             f"🐕 *WATCHDOG:* [💠 ACTIVE (THR)]\n"

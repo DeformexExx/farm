@@ -107,7 +107,10 @@ class AegisNebulaBot:
         self._loop = None
 
     async def sanity_check(self):
-        """Clean slate: stop all clones and ensure no ghost pythons."""
+        """Clean slate: stop all clones and ensure no ghost pythons (Delayed for Stability)."""
+        logger.info("⏳ AEGIS V3.0: Delaying Sanity Check for 30s to stabilize system...")
+        await asyncio.sleep(30)
+        
         logger.info("⚙️ Performing Sanity Check...")
         # Get all clones to stop them
         for clone in self.config.clones_data:
@@ -117,7 +120,7 @@ class AegisNebulaBot:
         
         # Kill other python instances except self
         my_pid = os.getpid()
-        await run_bash(f"su -c 'pgrep python | grep -v {my_pid} | xargs kill -9'")
+        await run_bash(f"su -c 'pgrep python | grep -v {my_pid} | xargs kill -9' 2>/dev/null")
         logger.info("✅ Sanity Check complete.")
 
     async def _check_admin(self, user_id: int) -> bool:
@@ -469,29 +472,43 @@ class AegisNebulaBot:
             except Exception as e:
                 logger.error(f"Watchdog error: {e}")
 
-    def run(self):
+    async def setup_and_run(self):
+        """Main entry point: Async execution with Master Pkill."""
         if not self.config.bot_token:
-            logger.error(f"Bot token missing. Check {self.config.bot_token_file}")
+            logger.error("Bot token missing.")
             return
-            
+
+        # 1. IMMEDIATE MASTER PKILL (Except self)
+        await run_bash(f"su -c 'pgrep python | grep -v {os.getpid()} | xargs kill -9' 2>/dev/null")
+        
         self.application = ApplicationBuilder().token(self.config.bot_token).build()
         self.application.add_handler(CommandHandler("start", self.start_cmd))
         self.application.add_handler(CommandHandler("console", self.toggle_console))
         self.application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_text))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         
-        # Startup and Watchdog Task
-        loop = asyncio.get_event_loop()
-        # Single Master Policy Enforcement on boot
-        loop.create_task(run_bash("pkill -9 -f 'python main.py'"))
-        loop.create_task(self.watchdog_task())
-        loop.create_task(self.sanity_check())
+        # Initialize Bot
+        await self.application.initialize()
+        await self.application.start()
         
-        logger.info(f"PROJECT AEGIS V2.2 started for {self.device_id}")
-        self.application.run_polling(drop_pending_updates=True)
+        # Start background tasks
+        asyncio.create_task(self.watchdog_task())
+        asyncio.create_task(self.sanity_check())
+        
+        logger.info(f"💎 PROJECT AEGIS V3.0 is ONLINE for {self.device_id}")
+        
+        # Start Polling
+        await self.application.updater.start_polling(drop_pending_updates=True)
+        
+        # Keep running
+        while True:
+            await asyncio.sleep(3600)
 
 if __name__ == "__main__":
+    bot = AegisNebulaBot()
     try:
-        AegisNebulaBot().run()
+        asyncio.run(bot.setup_and_run())
+    except KeyboardInterrupt:
+        pass
     except Exception as e:
         logger.critical(f"Fatal crash: {e}")
