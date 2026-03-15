@@ -8,15 +8,16 @@ logger = logging.getLogger("PersistenceManager")
 class PersistenceManager:
     def __init__(self, farm_dir: str):
         self.path = os.path.join(farm_dir, "persistence.json")
-        self.targets = {} # EXPLICIT ATTRIBUTE V3.0 AS DICT
+        self.targets = {} # EXPLICIT V3.0 DICT
         self.auto_restore = True
         self.console_mode = False
         
+        # Default Template
         self.data = {
             "auto_restore": True,
             "console_mode": False,
-            "target_clones": [], # Legacy
-            "targets": {} # V3.0
+            "target_clones": [], # Legacy List
+            "targets": {} # V3.0 Dict
         }
         self.load()
 
@@ -26,11 +27,12 @@ class PersistenceManager:
                 with open(self.path, "r", encoding="utf-8") as f:
                     loaded_data = json.load(f)
                     self.data.update(loaded_data)
-                    # Sync attributes from dictionary
+                    
+                    # Core Attributes Sync
                     self.auto_restore = self.data.get("auto_restore", True)
                     self.console_mode = self.data.get("console_mode", False)
                     
-                    # Sync targets: ensure it is a dict
+                    # Targets Migration/Sync
                     raw_targets = self.data.get("targets", self.data.get("target_clones", []))
                     if isinstance(raw_targets, list):
                         self.targets = {name: True for name in raw_targets}
@@ -41,12 +43,10 @@ class PersistenceManager:
 
     def save(self):
         try:
-            # Sync dictionary from attributes before saving
             self.data["auto_restore"] = self.auto_restore
             self.data["console_mode"] = self.console_mode
             self.data["targets"] = self.targets
-            # Keep legacy list in sync for older versions or other tools
-            self.data["target_clones"] = list(self.targets.keys())
+            self.data["target_clones"] = list(self.targets.keys()) # Keep legacy in sync
             
             with open(self.path, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, indent=4)
