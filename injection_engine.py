@@ -70,31 +70,35 @@ class InjectionEngine:
                     await update_status(f"❌ Chown Ошибка ({clone_name}):\n{stderr}")
                 return False
 
-            # 4. Launch (Monkey / Intent)
-            await update_status(f"⏳ ({clone_name}) 4/4: Запуск...")
+            # 4. Launch (Monkey / Intent) (Double-Action Start)
+            await update_status(f"⏳ ({clone_name}) 4/4: Запуск (Double-Action)...")
+            
+            # Step A: Start the app normally
+            await run_bash(f"su -c 'monkey -p com.roblox.{clone_name} -c android.intent.category.LAUNCHER 1'")
+            
             if place_id:
+                # Step B: Wait for the app to wake up
+                await asyncio.sleep(3)
+                
+                # Step C: Send the Join Intent
                 if "code=" in place_id:
-                    # Extract the 'code' value from the URL (e.g., https://.../share?code=TOKEN&type=Server)
+                    # Parse Share Link
                     try:
                         import urllib.parse
                         parsed_url = urllib.parse.urlparse(place_id)
                         share_code = urllib.parse.parse_qs(parsed_url.query).get('code', [None])[0]
                         if not share_code:
-                            # Crude fallback parsing if urlparse fails
                             share_code = place_id.split('code=')[1].split('&')[0]
                         
-                        join_cmd = f"su -c 'am start -a android.intent.action.VIEW -d \"roblox://navigation/share_links?code={share_code}&type=Server\" com.roblox.{clone_name}'"
+                        # Use -W flag to wait for intent delivery
+                        join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"roblox://navigation/share_links?code={share_code}&type=Server\" com.roblox.{clone_name}'"
                         await run_bash(join_cmd)
                     except Exception as e:
                         logger.error(f"Failed to parse share code: {e}")
-                        # Fallback to standard launch
-                        await run_bash(f"su -c 'monkey -p com.roblox.{clone_name} -c android.intent.category.LAUNCHER 1'")
                 else:
-                    # Fallback for old placeId format just in case
-                    join_cmd = f"su -c 'am start -a android.intent.action.VIEW -d \"roblox://placeId={place_id}\" com.roblox.{clone_name}'"
+                    # Standard PlaceID Intent
+                    join_cmd = f"su -c 'am start -W -a android.intent.action.VIEW -d \"roblox://placeId={place_id}\" com.roblox.{clone_name}'"
                     await run_bash(join_cmd)
-            else:
-                await run_bash(f"su -c 'monkey -p com.roblox.{clone_name} -c android.intent.category.LAUNCHER 1'")
                 
             await update_status(f"✅ Запущено ({clone_name})")
             return True
