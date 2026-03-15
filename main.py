@@ -110,12 +110,12 @@ class AegisNebulaBot:
 
     async def sync_git(self, update: Update):
         msg = await update.message.reply_text("⏳ Ожидание Git...")
-        cmd = f"cd {FARM_DIR} && git reset --hard origin/main && git pull"
+        cmd = f"cd {FARM_DIR} && git fetch --all && git reset --hard origin/main && git clean -fd"
         ret, stdout, stderr = await run_bash(cmd)
         
         if ret == 0:
             self.config.reload()
-            await msg.edit_text("✅ База аккаунтов синхронизирована. Нажмите [📊 МОНИТОРИНГ] для обновления интерфейса.")
+            await msg.edit_text("✅ Глобальная синхронизация завершена. Все файлы обновлены до последней версии.")
         else:
             await msg.edit_text(f"❌ Ошибка Git:\n{stderr}")
 

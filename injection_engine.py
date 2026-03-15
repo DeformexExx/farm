@@ -42,11 +42,11 @@ class InjectionEngine:
                 f"INSERT INTO cookies ("
                 f"creation_utc, host_key, top_frame_site_key, name, value, "
                 f"path, expires_utc, is_secure, is_httponly, last_access_utc, "
-                f"has_expires, is_persistent, samesite, source_port, last_update_utc"
+                f"has_expires, is_persistent, samesite, source_port"
                 f") VALUES ("
                 f"{current_time}, '.roblox.com', '', '.ROBLOSECURITY', '{cookie}', "
                 f"'/', 253402300799000000, 1, 1, {current_time}, "
-                f"1, 1, -1, -1, {current_time}"
+                f"1, 1, -1, -1"
                 f");"
             )
             
