@@ -1,183 +1,487 @@
 # -*- coding: utf-8 -*-
+# main.py — Project Aegis V3.0 Industrial Rebuild
 import os
 import sys
 
-# AEGIS V3.0: Absolute Path Lock
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(os.getcwd())
+# ── ABSOLUTE PATH LOCK ─────────────────────────────────────────────────────
+_bot_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(_bot_dir)
+sys.path.insert(0, _bot_dir)
 
 import asyncio
 import logging
 import time
+from typing import Optional
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import (
+    ApplicationBuilder, Application, CommandHandler,
+    ContextTypes, MessageHandler, filters, CallbackQueryHandler
+)
+from telegram.error import TelegramError
 
-from config_manager import ConfigManager
-from ui_manager import UIManager
-from monitor import MonitorEngine
-from injection_engine import InjectionEngine
-from bash_utils import run_bash
+from config_manager     import ConfigManager
+from ui_manager         import UIManager
+from monitor            import MonitorEngine
+from injection_engine   import InjectionEngine
+from bash_utils         import run_bash
 from persistence_manager import PersistenceManager
 
-# GLOBAL VERSION - HARDCODED
+# ── VERSION (HARDCODED — DO NOT CHANGE) ────────────────────────────────────
 VERSION = "3.0"
 
-# IDENTITY
+# ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
-    print("❌ Укажите DEVICE_ID. Пример: python main.py DEV_2")
+    print("❌  Usage: python main.py <DEVICE_ID>")
     sys.exit(1)
 
 DEVICE_ID = sys.argv[1]
-FARM_DIR = os.getcwd() 
+FARM_DIR  = _bot_dir
 
-# Logger
-logging.basicConfig(level=logging.INFO, format=f'%(asctime)s [{DEVICE_ID}] [%(levelname)s] %(message)s')
-logger = logging.getLogger(f"AegisV30")
+BOOT_LOG  = os.path.join(FARM_DIR, "boot_log.txt")
 
+# ── LOGGING ────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format=f"%(asctime)s [{DEVICE_ID}] [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(BOOT_LOG, encoding="utf-8"),
+    ]
+)
+logger = logging.getLogger("AegisV30")
+
+# Version integrity check
+if VERSION != "3.0":
+    logger.critical(f"⚠️  VERSION MISMATCH: expected 3.0, got {VERSION}")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOG STREAMER
+# ═══════════════════════════════════════════════════════════════════════════
 class TelegramLogHandler(logging.Handler):
     def __init__(self, streamer):
         super().__init__()
         self.streamer = streamer
+
     def emit(self, record):
-        self.streamer.add_log(f"[{record.levelname[:3].upper()}] {self.format(record)}")
+        self.streamer.add_line(f"[{record.levelname[:3]}] {self.format(record)}")
+
 
 class LogStreamer:
-    def __init__(self, bot, chat_id):
-        self.bot = bot
+    def __init__(self, bot, chat_id: int):
+        self.bot     = bot
         self.chat_id = chat_id
-        self.buffer = []
-        self._is_running = False
-    def add_log(self, text): self.buffer.append(text)
+        self.buffer  = []
+        self._running = False
+
+    def add_line(self, text: str):
+        self.buffer.append(text)
+
     async def start(self):
-        self._is_running = True
-        while self._is_running:
+        self._running = True
+        while self._running:
             await asyncio.sleep(2)
             if self.buffer:
-                msg = "\n".join(self.buffer[-10:])
-                self.buffer = []
-                try: await self.bot.send_message(self.chat_id, f"<code>{msg}</code>", parse_mode='HTML')
-                except: pass
-    def stop(self): self._is_running = False
+                batch = "\n".join(self.buffer[-30:])
+                self.buffer.clear()
+                try:
+                    await self.bot.send_message(
+                        self.chat_id,
+                        f"<code>{batch}</code>",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
 
-class AegisNebulaBot:
+    def stop(self):
+        self._running = False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WATCHDOG — stand-alone coroutine (receives application explicitly)
+# ═══════════════════════════════════════════════════════════════════════════
+async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
+    """
+    Runs forever. Checks thread count every 60s.
+    Uses application.bot for messaging — no NoneType risk.
+    Cool-down dict prevents restart loops (60s per clone).
+    """
+    cooldown: dict[str, float] = {}  # {clone_name: last_restart_timestamp}
+
+    while True:
+        await asyncio.sleep(60)
+        try:
+            for name in list(bot_instance.active_clones):
+                # Cool-down check
+                last = cooldown.get(name, 0)
+                if time.time() - last < 60:
+                    continue
+
+                st = await MonitorEngine.get_clone_status(name)
+                needs_restart = False
+
+                if "Offline" in st:
+                    reason = "Offline"
+                    needs_restart = True
+                elif "Thr:" in st:
+                    import re
+                    m = re.search(r"Thr:\s*(\d+)", st)
+                    if m:
+                        thr = int(m.group(1))
+                        if thr < 130:
+                            reason = f"Frozen (Thr:{thr})"
+                            needs_restart = True
+                        elif thr > 500:
+                            reason = f"Leaking (Thr:{thr})"
+                            needs_restart = True
+
+                if needs_restart:
+                    cooldown[name] = time.time()
+                    logger.warning(f"Watchdog: [{name}] {reason}. Restarting…")
+                    admin_id = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
+                    if admin_id:
+                        try:
+                            await application.bot.send_message(
+                                admin_id,
+                                f"🐕 *Watchdog*: `{name}` → {reason}\n⚡️ Перезапуск…",
+                                parse_mode="Markdown"
+                            )
+                        except TelegramError:
+                            pass
+                    await bot_instance._launch_clone(name, admin_id)
+
+            await bot_instance.refresh_dashboard()
+
+        except Exception as e:
+            logger.error(f"watchdog_loop error: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BOT CLASS
+# ═══════════════════════════════════════════════════════════════════════════
+class AegisBot:
     def __init__(self):
-        self.device_id = DEVICE_ID
-        self.config = ConfigManager(self.device_id, FARM_DIR)
+        self.config      = ConfigManager(DEVICE_ID, FARM_DIR)
         self.persistence = PersistenceManager(FARM_DIR)
-        self.application = None
-        # SAFE INIT V3.0
-        t = getattr(self.persistence, 'targets', {})
-        self.active_clones = set(t.keys()) if self.persistence.auto_restore and isinstance(t, dict) else set()
-        self._dashboard_msg = None
-        self.console_mode = self.persistence.console_mode
+        self.application: Optional[Application] = None
+        self._dash_msg   = None      # last dashboard message (for edit)
+        self._streamer: Optional[LogStreamer]      = None
+        self._log_handler: Optional[logging.Handler] = None
 
-    async def _check_admin(self, user_id: int) -> bool:
-        return user_id in self.config.admin_ids
+        # Restore active clones from persistence
+        targets = getattr(self.persistence, "targets", {})
+        if self.persistence.auto_restore and isinstance(targets, dict):
+            self.active_clones: set[str] = set(targets.keys())
+        else:
+            self.active_clones = set()
 
-    async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self._check_admin(update.effective_user.id): return
-        await update.message.reply_text(UIManager.get_welcome_text(self.device_id), reply_markup=UIManager.get_main_keyboard(), parse_mode='Markdown')
+    # ── Admin guard ────────────────────────────────────────────────────────
+    async def _is_admin(self, uid: int) -> bool:
+        return uid in self.config.admin_ids
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Command / Text handlers
+    # ─────────────────────────────────────────────────────────────────────
+    async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self._is_admin(update.effective_user.id):
+            return
+        await update.message.reply_text(
+            UIManager.get_welcome_text(DEVICE_ID),
+            reply_markup=UIManager.get_main_keyboard(),
+            parse_mode="Markdown"
+        )
+
+    async def cmd_console(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Display last 10 lines of boot_log.txt in a code block."""
+        if not await self._is_admin(update.effective_user.id):
+            return
+        try:
+            if os.path.exists(BOOT_LOG):
+                with open(BOOT_LOG, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                tail = "".join(lines[-10:]).strip() or "(empty)"
+            else:
+                tail = "(boot_log.txt not found)"
+            await update.message.reply_text(f"```\n{tail}\n```", parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Console error: {e}")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not await self._check_admin(update.effective_user.id): return
+        if not await self._is_admin(update.effective_user.id):
+            return
         t = update.message.text
-        if t == "📱 DEVICE": 
-            ram, cpu, temp = await MonitorEngine.get_system_stats()
-            await update.message.reply_text(UIManager.format_dashboard(self.device_id, ram, cpu, temp), reply_markup=UIManager.get_device_keyboard(), parse_mode='Markdown')
-        elif t == "🤖 CLONES":
-            await self.send_clones_menu(update)
-        elif t == "⚙️ SYSTEM":
-            await update.message.reply_text("⚙️ SYSTEM", reply_markup=UIManager.get_system_keyboard(self.console_mode, self.persistence.auto_restore), parse_mode='Markdown')
+        if   t == "📱 DEVICE": await self._open_device(update)
+        elif t == "🤖 CLONES": await self.open_clones_hub(update)
+        elif t == "⚙️ SYSTEM": await self._open_system(update)
 
-    async def send_clones_menu(self, update: Update):
+    # ─────────────────────────────────────────────────────────────────────
+    # Menu openers
+    # ─────────────────────────────────────────────────────────────────────
+    async def _open_device(self, update: Update):
+        ram, cpu, temp = await MonitorEngine.get_system_stats()
+        await update.message.reply_text(
+            UIManager.format_dashboard(DEVICE_ID, ram, cpu, temp),
+            reply_markup=UIManager.get_device_keyboard(),
+            parse_mode="Markdown"
+        )
+
+    async def _open_system(self, update: Update):
+        cons = getattr(self, "_console_on", False)
+        await update.message.reply_text(
+            "⚙️ *SYSTEM*",
+            reply_markup=UIManager.get_system_keyboard(cons, self.persistence.auto_restore),
+            parse_mode="Markdown"
+        )
+
+    async def open_clones_hub(self, update: Update):
         try:
             self.config.reload()
             status_map = {}
-            for c in self.config.clones_data: status_map[c.get("name")] = await MonitorEngine.get_clone_status(c.get("name"))
-            
-            # SAFE GETATTR AT LINE 162
-            targets = getattr(self.persistence, 'targets', {})
-            
-            text = UIManager.format_clones_hub(self.config.clones_data, status_map, targets)
-            self._dashboard_msg = await update.message.reply_text(text, reply_markup=UIManager.get_clones_hub_keyboard(self.config.clones_data), parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Hub Err: {e}")
-            await update.message.reply_text(f"❌ Ошибка меню: {e}")
+            for c in self.config.clones_data:
+                n = c.get("name")
+                if n:
+                    status_map[n] = await MonitorEngine.get_clone_status(n)
 
-    async def update_dashboard(self):
-        if not self._dashboard_msg: return
+            # ── SAFE GETATTR FIX (Line 162 equivalent) ──────────────────
+            targets = getattr(self.persistence, "targets", {})
+
+            text = UIManager.format_clones_hub(self.config.clones_data, status_map, targets)
+            kb   = UIManager.get_clones_hub_keyboard(self.config.clones_data)
+            self._dash_msg = await update.message.reply_text(
+                text, reply_markup=kb, parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"open_clones_hub error: {e}")
+            await update.message.reply_text(f"❌ Ошибка Hub: {e}")
+
+    async def refresh_dashboard(self):
+        """Edit the last Hub message in-place."""
+        if not self._dash_msg:
+            return
         try:
             status_map = {}
-            for c in self.config.clones_data: status_map[c.get("name")] = await MonitorEngine.get_clone_status(c.get("name"))
-            text = UIManager.format_clones_hub(self.config.clones_data, status_map, getattr(self.persistence, 'targets', {}))
-            await self._dashboard_msg.edit_text(text, reply_markup=UIManager.get_clones_hub_keyboard(self.config.clones_data), parse_mode='Markdown')
-        except: pass
+            for c in self.config.clones_data:
+                n = c.get("name")
+                if n:
+                    status_map[n] = await MonitorEngine.get_clone_status(n)
 
+            targets = getattr(self.persistence, "targets", {})
+            text = UIManager.format_clones_hub(self.config.clones_data, status_map, targets)
+            kb   = UIManager.get_clones_hub_keyboard(self.config.clones_data)
+            await self._dash_msg.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            pass  # Message too old / unchanged → ignore silently
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Callback handler
+    # ─────────────────────────────────────────────────────────────────────
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         q = update.callback_query
-        if not await self._check_admin(q.from_user.id): return
+        if not await self._is_admin(q.from_user.id):
+            return
         await q.answer()
         d = q.data
-        try:
-            if d == "nav_home": await q.message.reply_text(UIManager.get_welcome_text(self.device_id), reply_markup=UIManager.get_main_keyboard(), parse_mode='Markdown')
-            elif d == "toggle_restore": self.persistence.auto_restore = not self.persistence.auto_restore; await q.edit_message_reply_markup(UIManager.get_system_keyboard(self.console_mode, self.persistence.auto_restore))
-            elif d == "mass_start":
-                await context.bot.send_message(q.message.chat_id, "🚀 Запуск всех...")
-                for c in self.config.clones_data: await self._start_clone(c.get("name"), q.message.chat_id)
-            elif d == "mass_stop":
-                for c in self.config.clones_data: await self._stop_clone(c.get("name"), q.message.chat_id)
-            elif d.startswith("start_"): await self._start_clone(d.replace("start_", ""), q.message.chat_id)
-            elif d.startswith("stop_"): await self._stop_clone(d.replace("stop_", ""), q.message.chat_id)
-        except Exception as e: logger.error(f"CB Err: {e}")
+        chat = q.message.chat_id
 
-    async def _start_clone(self, name, chat_id):
+        try:
+            if d == "nav_home":
+                await q.message.reply_text(
+                    UIManager.get_welcome_text(DEVICE_ID),
+                    reply_markup=UIManager.get_main_keyboard(),
+                    parse_mode="Markdown"
+                )
+
+            elif d == "toggle_restore":
+                self.persistence.auto_restore = not self.persistence.auto_restore
+                self.persistence.save()
+                cons = getattr(self, "_console_on", False)
+                await q.edit_message_reply_markup(
+                    UIManager.get_system_keyboard(cons, self.persistence.auto_restore)
+                )
+
+            elif d == "toggle_console":
+                await self._toggle_console(context, chat)
+                cons = getattr(self, "_console_on", False)
+                await q.edit_message_reply_markup(
+                    UIManager.get_system_keyboard(cons, self.persistence.auto_restore)
+                )
+
+            elif d == "sys_sync":
+                await self._git_sync(chat)
+
+            elif d == "sys_screenshot":
+                await self._take_screenshot(q.message)
+
+            elif d == "sys_help":
+                await q.message.reply_text(UIManager.get_help_text(), parse_mode="Markdown")
+
+            elif d == "mass_start":
+                await context.bot.send_message(chat, "🚀 Mass Start…")
+                for c in self.config.clones_data:
+                    await self._launch_clone(c.get("name"), chat)
+
+            elif d == "mass_stop":
+                for c in self.config.clones_data:
+                    await self._kill_clone(c.get("name"), chat)
+                await context.bot.send_message(chat, "❄️ Mass Stop done.")
+
+            elif d.startswith("start_"):
+                await self._launch_clone(d[6:], chat)
+
+            elif d.startswith("stop_"):
+                await self._kill_clone(d[5:], chat)
+
+        except Exception as e:
+            logger.error(f"Callback [{d}] error: {e}")
+            try:
+                await context.bot.send_message(chat, f"❌ Error: {e}")
+            except Exception:
+                pass
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Clone logic
+    # ─────────────────────────────────────────────────────────────────────
+    async def _launch_clone(self, name: Optional[str], chat_id: Optional[int]):
+        if not name:
+            return
         ci = self.config.get_clone(name)
-        if not ci: return
+        if not ci:
+            return
         self.persistence.add_target(name)
         self.active_clones.add(name)
-        sm = await self.application.bot.send_message(chat_id, f"⏳ [{name}] Launch...")
+        sm = None
+        if chat_id and self.application:
+            try:
+                sm = await self.application.bot.send_message(chat_id, f"⏳ `{name}` — Запуск…", parse_mode="Markdown")
+            except Exception:
+                pass
         await InjectionEngine.inject_and_launch(name, ci.get("cookie"), None, sm)
         await asyncio.sleep(10)
         urls = self.config.servers_list
         await InjectionEngine.inject_and_launch(name, ci.get("cookie"), urls[0] if urls else None, sm)
-        await self.update_dashboard()
+        await self.refresh_dashboard()
 
-    async def _stop_clone(self, name, chat_id):
+    async def _kill_clone(self, name: Optional[str], chat_id: Optional[int]):
+        if not name:
+            return
         self.persistence.remove_target(name)
         self.active_clones.discard(name)
         await InjectionEngine.stop(name)
-        await self.application.bot.send_message(chat_id, f"✅ {name} Stopped.")
-        await self.update_dashboard()
-
-    async def watchdog_task(self):
-        while True:
-            await asyncio.sleep(60)
-            if not self.application: continue
+        if chat_id and self.application:
             try:
-                for n in list(self.active_clones):
-                    st = await MonitorEngine.get_clone_status(n)
-                    if "Offline" in st or ("Thr:" in st and int(st.split("Thr:")[1].split("|")[0].strip()) < 130):
-                        logger.warning(f"Watchdog: {n} restarting...")
-                        aid = self.config.admin_ids[0] if self.config.admin_ids else None
-                        if aid: await self.application.bot.send_message(aid, f"🐕 Watchdog: {n} завис. Перезапуск...")
-                        await self._start_clone(n, aid)
-                await self.update_dashboard()
-            except Exception as e: logger.error(f"WD Err: {e}")
+                await self.application.bot.send_message(chat_id, f"✅ `{name}` остановлен.", parse_mode="Markdown")
+            except Exception:
+                pass
+        await self.refresh_dashboard()
 
-    async def setup_and_run(self):
-        # 1. HARD PKILL
-        await run_bash(f"su -c 'pgrep python | grep -v {os.getpid()} | xargs kill -9' 2>/dev/null")
+    # ─────────────────────────────────────────────────────────────────────
+    # Helpers
+    # ─────────────────────────────────────────────────────────────────────
+    async def _toggle_console(self, context, chat_id: int):
+        self._console_on = not getattr(self, "_console_on", False)
+        if self._console_on:
+            self._streamer    = LogStreamer(context.bot, chat_id)
+            self._log_handler = TelegramLogHandler(self._streamer)
+            logging.getLogger().addHandler(self._log_handler)
+            asyncio.create_task(self._streamer.start())
+        else:
+            if self._log_handler:
+                logging.getLogger().removeHandler(self._log_handler)
+                self._log_handler = None
+            if self._streamer:
+                self._streamer.stop()
+                self._streamer = None
+
+    async def _take_screenshot(self, message):
+        """Safe screenshot with absolute path and try-except."""
+        buf = "/data/local/tmp/aegis_shot.png"
+        try:
+            ret, _, err = await run_bash(
+                f"su -c 'screencap -p {buf} && chmod 644 {buf}'"
+            )
+            if ret != 0:
+                await message.reply_text(f"❌ screencap failed: {err}")
+                return
+            with open(buf, "rb") as f:
+                await message.reply_photo(photo=f, caption=f"📸 {DEVICE_ID}")
+        except Exception as e:
+            logger.error(f"Screenshot error: {e}")
+            await message.reply_text(f"❌ Screenshot Exception: {e}")
+
+    async def _git_sync(self, chat_id: int):
+        try:
+            if self.application:
+                await self.application.bot.send_message(chat_id, "♻️ Git Sync…")
+            ret, out, err = await run_bash("git -C " + _bot_dir + " pull --rebase 2>&1")
+            result = out or err or "(no output)"
+            # Version check post-sync
+            ver_check = f"\n✅ Local VERSION confirmed: {VERSION}" if VERSION == "3.0" else f"\n⚠️ VERSION MISMATCH: {VERSION}"
+            if self.application:
+                await self.application.bot.send_message(chat_id, f"```\n{result[:3000]}\n```{ver_check}", parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"git_sync error: {e}")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Global error handler
+    # ─────────────────────────────────────────────────────────────────────
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+        logger.error(f"Unhandled exception: {context.error}", exc_info=context.error)
+        admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
+        if admin_id:
+            try:
+                await context.bot.send_message(
+                    admin_id,
+                    f"🚨 *Global Error*\n`{context.error}`",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Entry-point
+    # ─────────────────────────────────────────────────────────────────────
+    async def run(self):
+        # 1. Kill duplicate python processes
+        await run_bash(
+            f"su -c 'pgrep -f \"python.*main.py\" | grep -v {os.getpid()} | xargs kill -9' 2>/dev/null"
+        )
+
+        # 2. Build application
         self.application = ApplicationBuilder().token(self.config.bot_token).build()
-        self.application.add_handler(CommandHandler("start", self.start_cmd))
-        self.application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_text))
-        self.application.add_handler(CallbackQueryHandler(self.handle_callback))
-        await self.application.initialize()
-        await self.application.start()
-        asyncio.create_task(self.watchdog_task())
-        logger.info(f"💎 PROJECT AEGIS V{VERSION} ONLINE")
-        await self.application.updater.start_polling(drop_pending_updates=True)
-        while True: await asyncio.sleep(3600)
 
+        # 3. Register handlers
+        app = self.application
+        app.add_handler(CommandHandler("start",   self.cmd_start))
+        app.add_handler(CommandHandler("console", self.cmd_console))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
+        app.add_handler(CallbackQueryHandler(self.handle_callback))
+        app.add_error_handler(self.error_handler)  # Global error handler
+
+        # 4. Start
+        await app.initialize()
+        await app.start()
+
+        # 5. Launch Watchdog with explicit application reference (fix NoneType)
+        asyncio.create_task(watchdog_loop(app, self))
+
+        logger.info(f"💎 PROJECT AEGIS V{VERSION} ONLINE — {DEVICE_ID}")
+
+        # 6. Poll (drop stale messages)
+        await app.updater.start_polling(drop_pending_updates=True)
+
+        # 7. Block forever
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass
+        finally:
+            await app.stop()
+            await app.shutdown()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    try: asyncio.run(AegisNebulaBot().setup_and_run())
-    except: pass
+    try:
+        asyncio.run(AegisBot().run())
+    except Exception as e:
+        logger.critical(f"Fatal startup error: {e}")
