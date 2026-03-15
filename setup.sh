@@ -1,6 +1,6 @@
 #!/bin/bash
-# AEGIS OVERLORD v17 - ULTIMATE FLEET CONTROL INSTALLER
-# ./setup.sh DEV_2
+# AEGIS NEBULA v20.0 - ULTIMATE FLEET CONTROL INSTALLER
+# Использование: ./setup.sh DEV_2
 
 if [ -z "$1" ]; then
     echo "❌ Ошибка: Укажите ID устройства (например: DEV_2)"
@@ -12,13 +12,13 @@ BOOT_DIR="$HOME/.termux/boot"
 BOOT_SCRIPT="$BOOT_DIR/aegis_start.sh"
 
 echo "------------------------------------------------"
-echo "🚀 Установка Aegis Overlord v17: Ultimate Fleet Control [$DEVICE_ID]"
+echo "🚀 Установка Aegis Nebula v20.0 [$DEVICE_ID]"
 echo "------------------------------------------------"
 
 # 1. Системные пакеты (TSU + SQLITE)
-echo "📦 [1/4] Установка системных пакетов (tsu, sqlite, git)..."
+echo "📦 [1/4] Установка системных пакетов (python, tsu, sqlite, git, termux-api)..."
 pkg update && pkg upgrade -y
-pkg install python git tsu sqlite ntpdate -y
+pkg install python git tsu sqlite ntpdate termux-tools -y
 
 # 2. Python зависимости
 echo "🐍 [2/4] Установка Python библиотек..."
@@ -30,7 +30,7 @@ mkdir -p "$BOOT_DIR"
 
 cat <<EOF > "$BOOT_SCRIPT"
 #!/bin/bash
-# Aegis Overlord Boot v17
+# Aegis Nebula Boot v20.0
 termux-wake-lock
 ntpdate -u pool.ntp.org || true
 
@@ -58,5 +58,5 @@ echo "------------------------------------------------"
 echo "ПОСЛЕДНИЕ ШАГИ:"
 echo "1. Убедитесь, что файл '$DEVICE_ID.json' есть в ~/farm/"
 echo "2. Убедитесь, что 'config.json' с токеном бота есть в ~/farm/"
-echo "3. Введите: sh setup_boot.sh если нужно обновить Termux:Boot руками"
+echo "3. Запустите приложение Termux:Boot один раз вручную, чтобы дать ему права автозапуска."
 echo "------------------------------------------------"
