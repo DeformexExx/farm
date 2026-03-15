@@ -549,10 +549,23 @@ class AegisBot:
     # Entry-point
     # ─────────────────────────────────────────────────────────────────────
     async def run(self):
-        # 1. Kill duplicates
-        await run_bash(
-            f"su -c 'pgrep -f \"python.*main.py\" | grep -v {os.getpid()} | xargs kill -9' 2>/dev/null"
-        )
+        # 1. SAFE KILL — use PID file, never global pkill
+        pid_file = os.path.join(FARM_DIR, "bot.pid")
+        if os.path.exists(pid_file):
+            try:
+                old_pid = int(open(pid_file).read().strip())
+                if old_pid != os.getpid():
+                    await run_bash(f"kill {old_pid} 2>/dev/null; sleep 2; kill -9 {old_pid} 2>/dev/null")
+                    logger.info(f"Killed previous bot instance (PID {old_pid})")
+            except Exception:
+                pass
+        # Write our own PID
+        try:
+            with open(pid_file, "w") as f:
+                f.write(str(os.getpid()))
+        except Exception:
+            pass
+
 
         # 2. Build application
         self.application = ApplicationBuilder().token(self.config.bot_token).build()
