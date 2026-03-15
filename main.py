@@ -30,7 +30,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "4.0"
+VERSION = "5.0"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -110,8 +110,16 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     offline_strikes: Dict[str, int]   = {}
     last_action:     Dict[str, float] = {}
 
+    # SILENT START: Skip everything for first 10 minutes
+    boot_time = time.time()
+    
     while True:
         await asyncio.sleep(60)
+        
+        # ══ 10-MINUTE TOTAL SILENCE ════════════════════════════════════
+        if time.time() - boot_time < 600:
+            logger.info(f"Watchdog: Silent Mode Active ({int(600 - (time.time() - boot_time))}s remaining)")
+            continue
         try:
             now = time.time()
 
@@ -189,6 +197,7 @@ class AegisBot:
         self._streamer   = None
         self._log_handler = None
         self._console_on: bool = self.persistence.console_mode
+        self._last_ui_update: float = 0.0
 
         # ── STATE MACHINE ─────────────────────────────────────────────────
         # {clone_name: CloneState}
@@ -281,12 +290,18 @@ class AegisBot:
         state_map  = {n: s.value for n, s in self.clone_states.items()}
         return UIManager.format_clones_hub(self.config.clones_data, state_map, self.running_since)
 
-    async def refresh_dashboard(self):
+    async def refresh_dashboard(self, force=False):
         if not self._dash_msg: return
+        now = time.time()
+        # UI Throttle: 60 seconds unless forced
+        if not force and (now - self._last_ui_update < 60):
+            return
+            
         try:
             text = self._build_hub_text()
             kb   = UIManager.get_clones_hub_keyboard(self.config.clones_data)
             await self._dash_msg.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+            self._last_ui_update = now
         except Exception:
             pass
 
@@ -379,53 +394,29 @@ class AegisBot:
             return
 
         async with self._start_lock:
-            # ── STARTING state ──────────────────────────────────────────
+            # ── 1. Force Identity & Inject ──────────────────────────────
             self.set_state(name, CloneState.STARTING)
-            self.persistence.add_target(name, "RUNNING")
-
+            
             sm = None
             if chat_id and self.application:
                 try:
                     sm = await self.application.bot.send_message(
-                        chat_id, f"⏳ `{name}` → STARTING (1/4…)", parse_mode="Markdown")
+                        chat_id, f"🚀 `{name}`: Запуск...", parse_mode="Markdown")
                 except Exception:
                     pass
 
-            # ── Run injection (does NOT set RUNNING) ────────────────────
-            ok = await InjectionEngine.inject_and_launch(name, ci.get("cookie"), None, sm)
-            await asyncio.sleep(10)
+            # V5.0 Sequence: Cookie -> Launch only
             urls = self.config.servers_list
-            await InjectionEngine.inject_and_launch(
+            ok = await InjectionEngine.inject_and_launch(
                 name, ci.get("cookie"), urls[0] if urls else None, sm)
 
-            if ok is False:
-                # Injection failed
+            if ok:
+                self.set_state(name, CloneState.RUNNING)
+                self.persistence.add_target(name, "RUNNING")
+            else:
                 self.set_state(name, CloneState.STOPPED)
-                logger.error(f"[{name}] Injection failed — back to STOPPED.")
-                return
 
-            # ── 5-MINUTE GRACE PERIOD before RUNNING ────────────────────
-            logger.info(f"[{name}] 4/4 complete. Waiting 300s grace period before RUNNING…")
-            if sm:
-                try:
-                    await sm.edit_text(
-                        f"✅ `{name}` 4/4 complete.\n⏳ *Grace period: 5 min* (Watchdog blind until then…)",
-                        parse_mode="Markdown"
-                    )
-                except Exception:
-                    pass
-            await asyncio.sleep(300)
-
-            # ── Transition to RUNNING ────────────────────────────────────
-            self.set_state(name, CloneState.RUNNING)
-            logger.info(f"[{name}] → RUNNING. Watchdog monitoring begins now.")
-            if sm:
-                try:
-                    await sm.edit_text(f"🟢 `{name}` is *RUNNING*. Watchdog active.", parse_mode="Markdown")
-                except Exception:
-                    pass
-
-        await self.refresh_dashboard()
+        await self.refresh_dashboard(force=True)
 
     async def _mass_start(self, chat_id):
         """Sequential mass start via the _start_lock queue."""
@@ -458,7 +449,7 @@ class AegisBot:
                     chat_id, f"🌑 `{name}` stopped.", parse_mode="Markdown")
             except Exception:
                 pass
-        await self.refresh_dashboard()
+        await self.refresh_dashboard(force=True)
 
     # ─────────────────────────────────────────────────────────────────────
     # Auto-resume on startup

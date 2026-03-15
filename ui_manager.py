@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V4.0*\n"
+            "💎 *AEGIS OVERLORD V5.0*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[💠 ONLINE]`\n"
+            f"⚡️ SYSTEM : `[💠 ONLINE (SAFE)]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -163,11 +163,10 @@ class UIManager:
     @staticmethod
     def get_help_text() -> str:
         return (
-            "🎮 *AEGIS V4.0 GUIDE*\n\n"
-            "State Machine:\n"
-            "  🌑 STOPPED → ⏳ STARTING → 🟢 RUNNING\n\n"
-            "• Watchdog is *blind* to non-RUNNING clones\n"
-            "• asyncio.Lock enforces single-clone startup\n"
-            "• 60s sequential gap between clones\n"
-            "• 5-min grace after Step 4/4 before monitoring"
+            "🛡 *AEGIS V5.0 SAFE MODE*\n\n"
+            "• Watchdog: *Silent* for 10 mins after boot\n"
+            "• Startup: Set Identity -> Inject -> Launch (No Cleanup)\n"
+            "• UI Refresh: Throttled to 60s gap\n"
+            "• Locking: Serialized startup active\n\n"
+            "Stable logic: No aggressive kills or background interference."
         )

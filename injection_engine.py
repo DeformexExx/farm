@@ -23,10 +23,8 @@ class InjectionEngine:
                     pass
 
         try:
-            # 1. Force Stop
-            await update_status(f"⏳ ({clone_name}) 1/4: Остановка...")
-            await run_bash(f"su -c 'am force-stop com.roblox.{clone_name}'")
-            await asyncio.sleep(1)
+            # 1. Skip Cleanup (V5.0 SAFE MODE)
+            # await run_bash(f"su -c 'am force-stop com.roblox.{clone_name}'")
 
             # 2. SQLite Injection (STRICT BASH)
             await update_status(f"⏳ ({clone_name}) 2/4: Инъекция Cookie (BASH)...")
