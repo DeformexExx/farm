@@ -2,11 +2,136 @@
 import asyncio
 import logging
 import time
+import re
 from bash_utils import run_bash
 
 logger = logging.getLogger("InjectionEngine")
 
 class InjectionEngine:
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # V7.0 GLOBAL START LOCK — Prevents concurrent am start calls
+    # ═══════════════════════════════════════════════════════════════════════
+    _start_lock = asyncio.Lock()
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # PID MANAGEMENT — Targeted Isolation v7.0
+    # ═══════════════════════════════════════════════════════════════════════
+    @staticmethod
+    async def get_clone_pid(clone_name: str) -> str:
+        """Get specific PID for a clone. Returns empty string if not running."""
+        package = f"com.roblox.{clone_name}"
+        ret, stdout, _ = await run_bash(f"su -c 'pidof {package}'")
+        if ret == 0 and stdout.strip():
+            # pidof can return multiple PIDs, take the first one
+            return stdout.strip().split()[0]
+        return ""
+    
+    @staticmethod
+    async def clear_memory():
+        """Send memory clear command to OS to prevent Chain Crash effect."""
+        # Drop caches (requires root)
+        await run_bash("su -c 'echo 3 > /proc/sys/vm/drop_caches'")
+        # Trim caches via activity manager
+        await run_bash("su -c 'am trim-memory RUNNING_CRITICAL'")
+        # Trigger garbage collection hint
+        await run_bash("su -c 'kill -10 1' 2>/dev/null || true")  # SIGUSR1 to init, optional
+    
+    @staticmethod
+    async def kill_by_pid(pid: str, clone_name: str) -> bool:
+        """
+        V7.0 TARGETED KILL: Graceful (-15) then Force (-9) if needed.
+        VALIDATION: Only kills PIDs that belong to the specific Roblox clone.
+        NEVER use pkill or am force-stop.
+        """
+        if not pid:
+            logger.warning(f"[{clone_name}] No PID provided for kill.")
+            return False
+        
+        # V7.0 VALIDATION: Verify PID belongs to target clone
+        package = f"com.roblox.{clone_name}"
+        try:
+            # Check /proc/{pid}/cmdline to verify ownership
+            ret, cmdline, _ = await run_bash(f"su -c 'cat /proc/{pid}/cmdline 2>/dev/null || echo UNKNOWN'")
+            if ret != 0 or not cmdline or package not in cmdline:
+                # Fallback: check ps output
+                ret2, ps_out, _ = await run_bash(f"su -c 'ps -A | grep {pid}'")
+                if ret2 != 0 or package not in ps_out:
+                    logger.error(f"⚓ ANCHOR: PID {pid} VALIDATION FAILED - does not belong to {package}. ABORTING KILL.")
+                    return False
+        except Exception as e:
+            logger.warning(f"⚓ ANCHOR: PID validation warning: {e}")
+        
+        logger.info(f"⚓ ANCHOR: [{clone_name}] Targeted kill initiated for PID {pid}")
+        
+        # Step 1: Graceful shutdown (SIGTERM)
+        ret, _, _ = await run_bash(f"su -c 'kill -15 {pid}'")
+        
+        # Wait up to 3 seconds for graceful exit
+        for i in range(6):
+            await asyncio.sleep(0.5)
+            check_ret, _, _ = await run_bash(f"su -c 'kill -0 {pid} 2>/dev/null && echo ALIVE || echo DEAD'")
+            if "DEAD" in check_ret:
+                logger.info(f"⚓ ANCHOR: [{clone_name}] PID {pid} exited gracefully.")
+                return True
+        
+        # Step 2: Force kill (SIGKILL) if still alive
+        logger.warning(f"⚓ ANCHOR: [{clone_name}] PID {pid} resisted SIGTERM, applying SIGKILL...")
+        ret, _, _ = await run_bash(f"su -c 'kill -9 {pid}'")
+        await asyncio.sleep(0.5)
+        
+        # Verify death
+        check_ret, _, _ = await run_bash(f"su -c 'kill -0 {pid} 2>/dev/null && echo ALIVE || echo DEAD'")
+        success = "DEAD" in check_ret
+        if success:
+            logger.info(f"⚓ ANCHOR: [{clone_name}] PID {pid} terminated forcefully.")
+        else:
+            logger.error(f"⚓ ANCHOR: [{clone_name}] FAILED to kill PID {pid}!")
+        return success
+    
+    @staticmethod
+    async def stop(clone_name: str) -> bool:
+        """
+        TARGETED ISOLATION: Find specific PID and kill it.
+        NEVER touches com.roblox.client base unless confirmed as target.
+        """
+        # Clear memory BEFORE closing to prevent Chain Crash
+        await InjectionEngine.clear_memory()
+        await asyncio.sleep(0.3)
+        
+        # Get specific PID
+        pid = await InjectionEngine.get_clone_pid(clone_name)
+        if not pid:
+            logger.info(f"[{clone_name}] Not running (no PID found).")
+            return True  # Already stopped
+        
+        # Targeted kill
+        success = await InjectionEngine.kill_by_pid(pid, clone_name)
+        
+        # Cleanup any remaining orphans for this package specifically
+        package = f"com.roblox.{clone_name}"
+        ret, stdout, _ = await run_bash(f"su -c 'ps -A | grep {package} | grep -v grep'")
+        if ret == 0 and stdout.strip():
+            # Found orphans, get their PIDs
+            for line in stdout.strip().split('\n'):
+                parts = line.split()
+                if len(parts) >= 2:
+                    orphan_pid = parts[1]
+                    if orphan_pid != pid:
+                        logger.warning(f"[{clone_name}] Cleaning orphan PID {orphan_pid}")
+                        await InjectionEngine.kill_by_pid(orphan_pid, clone_name)
+        
+        return success
+    
+    @staticmethod
+    async def clean(clone_name: str) -> bool:
+        """Stop clone and clear its cache."""
+        await InjectionEngine.stop(clone_name)
+        # Clear memory again after stop
+        await InjectionEngine.clear_memory()
+        # Clear app cache
+        ret, stdout, stderr = await run_bash(f"su -c 'rm -rf /data/data/com.roblox.{clone_name}/cache/*'")
+        return ret == 0
     @staticmethod
     async def inject_and_launch(clone_name: str, cookie: str, place_id: str, status_msg=None) -> bool:
         """
@@ -112,22 +237,22 @@ class InjectionEngine:
                 
             await update_status(f"✅ Запущено ({clone_name})")
             return True
-                
-            await update_status(f"✅ Запущено ({clone_name})")
-            return True
             
         except Exception as e:
             logger.error(f"Launch Sequence Error for {clone_name}: {e}")
             await update_status(f"❌ Критическая ошибка ({clone_name}): {str(e)}")
             return False
 
-    @staticmethod
-    async def stop(clone_name: str) -> bool:
-        ret, stdout, stderr = await run_bash(f"su -c 'am force-stop com.roblox.{clone_name}'")
-        return ret == 0
+# ═══════════════════════════════════════════════════════════════════════════
+# V7.0 ASYNC LOCK WRAPPER for inject_and_launch
+# ═══════════════════════════════════════════════════════════════════════════
+_original_inject = InjectionEngine.inject_and_launch.__func__
 
-    @staticmethod
-    async def clean(clone_name: str) -> bool:
-        await InjectionEngine.stop(clone_name)
-        ret, stdout, stderr = await run_bash(f"su -c 'rm -rf /data/data/com.roblox.{clone_name}/cache/*'")
-        return ret == 0
+async def _locked_inject(clone_name: str, cookie: str, place_id: str, status_msg=None) -> bool:
+    """V7.0: Global StartLock wrapper to prevent concurrent am start calls."""
+    async with InjectionEngine._start_lock:
+        logger.info(f"⚓ ANCHOR: Global StartLock acquired for {clone_name}")
+        return await _original_inject(clone_name, cookie, place_id, status_msg)
+
+InjectionEngine.inject_and_launch = staticmethod(_locked_inject)
+# ═══════════════════════════════════════════════════════════════════════════

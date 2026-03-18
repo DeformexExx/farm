@@ -1,5 +1,5 @@
 #!/bin/bash
-# AEGIS NEBULA v20.0 - ULTIMATE FLEET CONTROL INSTALLER
+# AEGIS SYSTEM ANCHOR v7.0 - ULTIMATE FLEET CONTROL INSTALLER
 # Использование: ./setup.sh DEV_2
 
 if [ -z "$1" ]; then
@@ -12,7 +12,7 @@ BOOT_DIR="$HOME/.termux/boot"
 BOOT_SCRIPT="$BOOT_DIR/aegis_start.sh"
 
 echo "------------------------------------------------"
-echo "🚀 Установка Aegis Nebula v20.0 [$DEVICE_ID]"
+echo "⚓ Установка Aegis System Anchor v7.0 [$DEVICE_ID]"
 echo "------------------------------------------------"
 
 # 1. Системные пакеты (TSU + SQLITE)
@@ -30,15 +30,13 @@ mkdir -p "$BOOT_DIR"
 
 cat <<EOF > "$BOOT_SCRIPT"
 #!/bin/bash
-# Aegis Nebula Boot v20.0
-termux-wake-lock
-ntpdate -u pool.ntp.org || true
-
+# Aegis V7.0 System Anchor Boot Script
 cd ~/farm
 git reset --hard origin/main
 git pull
 
-tsu -c "python main.py $DEVICE_ID"
+# Use python -u (unbuffered) for V7.0 System Anchor Mode
+tsu -c "python -u main.py $DEVICE_ID"
 EOF
 
 chmod +x "$BOOT_SCRIPT"

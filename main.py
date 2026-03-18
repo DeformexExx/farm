@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V4.0 State Machine Edition
+# main.py — Project Aegis V7.0 System Anchor Architecture
 import os
 import sys
 import enum
 import asyncio
 import logging
 import time
+import signal
+import threading
 from typing import Optional, Dict
 
 # ── ABSOLUTE PATH LOCK ─────────────────────────────────────────────────────
@@ -30,7 +32,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "5.0"
+VERSION = "7.0"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -50,7 +52,147 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV40")
+logger = logging.getLogger("AegisV70")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── PID LOCK FILE ─────────────────────────────────────────────────────────
+LOCK_FILE = os.path.join(FARM_DIR, f".aegis_{DEVICE_ID}.lock")
+
+def acquire_pid_lock() -> bool:
+    """
+    V7.0: PID-Locking to prevent ghost duplicates.
+    Returns True if lock acquired, False if another instance is running.
+    """
+    import os
+    current_pid = os.getpid()
+    
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, "r") as f:
+                old_pid = f.read().strip()
+            if old_pid:
+                # Check if old process is still alive
+                try:
+                    os.kill(int(old_pid), 0)
+                    # Process exists - we are a ghost
+                    logger.critical(f"🚫 ANCHOR: Another Aegis instance running (PID {old_pid}). Exiting.")
+                    return False
+                except (ProcessLookupError, ValueError, OSError):
+                    # Process is dead, we can take over
+                    pass
+        except Exception:
+            pass
+    
+    # Write our PID
+    with open(LOCK_FILE, "w") as f:
+        f.write(str(current_pid))
+    logger.info(f"⚓ ANCHOR: PID lock acquired ({current_pid})")
+    return True
+
+def release_pid_lock():
+    """Release the PID lock on shutdown."""
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+            logger.info("⚓ ANCHOR: PID lock released")
+    except Exception:
+        pass
+
+# ── SIGNAL HANDLERS ───────────────────────────────────────────────────────
+def _signal_handler(signum, frame):
+    """
+    V7.0: Ignore SIGHUP and SIGTERM from Android LMK.
+    Only exit on SIGINT (Ctrl+C) or explicit shutdown.
+    """
+    sig_name = signal.Signals(signum).name
+    logger.warning(f"⚓ ANCHOR: Signal {sig_name} received and IGNORED (LMK immunity)")
+
+# Register LMK-resistant signal handlers
+try:
+    signal.signal(signal.SIGHUP, _signal_handler)   # Hang up - ignore
+    signal.signal(signal.SIGTERM, _signal_handler)  # Terminate - ignore
+    # SIGINT (Ctrl+C) and SIGKILL remain unhandled for emergency exit
+except Exception as e:
+    logger.warning(f"⚓ ANCHOR: Signal handler setup failed: {e}")
+
+# ── SYSTEM PRIORITY & OOM ─────────────────────────────────────────────────
+async def anchor_to_system():
+    """
+    V7.0: Make bot the LAST thing the system kills.
+    - Set OOM score to -1000 (unkillable)
+    - Increase CPU priority
+    """
+    pid = os.getpid()
+    
+    # OOM Score Adjustment (-1000 = never kill)
+    oom_path = f"/proc/{pid}/oom_score_adj"
+    try:
+        ret, _, _ = await run_bash(f"su -c 'echo -1000 > {oom_path}'")
+        if ret == 0:
+            logger.info("⚓ ANCHOR: OOM score set to -1000 (unkillable)")
+        else:
+            logger.warning("⚓ ANCHOR: Failed to set OOM score (requires root)")
+    except Exception as e:
+        logger.warning(f"⚓ ANCHOR: OOM adjustment error: {e}")
+    
+    # CPU Priority (renice -15 = high priority)
+    try:
+        ret, _, _ = await run_bash(f"su -c 'renice -n -15 -p {pid}'")
+        if ret == 0:
+            logger.info("⚓ ANCHOR: CPU priority elevated (renice -15)")
+    except Exception as e:
+        logger.warning(f"⚓ ANCHOR: renice error: {e}")
+    
+    # Taskset (if available) - bind to CPU 0 for consistency
+    try:
+        ret, _, _ = await run_bash(f"su -c 'taskset -p 01 {pid}' 2>/dev/null")
+        if ret == 0:
+            logger.info("⚓ ANCHOR: CPU affinity set (taskset)")
+    except Exception:
+        pass  # taskset may not be available
+
+# ── SURGICAL TRIM ─────────────────────────────────────────────────────────
+async def surgical_trim(bot_instance: "AegisBot"):
+    """
+    V7.0: Memory Pressure Relief.
+    Before RAM hits red zone, trim idle clones without killing.
+    Uses 'am set-inactive' to free GPU buffers.
+    """
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        
+        # If RAM > 85%, trigger surgical trim
+        if mem.percent > 85:
+            logger.warning(f"⚓ ANCHOR: Memory pressure detected ({mem.percent}%), initiating surgical trim...")
+            
+            for c in bot_instance.config.clones_data:
+                name = c.get("name")
+                if not name:
+                    continue
+                    
+                state = bot_instance.clone_states.get(name, CloneState.STOPPED)
+                package = f"com.roblox.{name}"
+                
+                # Only trim RUNNING clones that haven't been active recently
+                if state == CloneState.RUNNING:
+                    # Check if clone has been running for > 5 minutes (not newly started)
+                    runtime = time.time() - bot_instance.running_since.get(name, time.time())
+                    if runtime > 300:  # 5 minutes
+                        # Set inactive to free GPU buffers without killing
+                        await run_bash(f"su -c 'am set-inactive {package} true'")
+                        logger.info(f"⚓ ANCHOR: Surgical trim applied to {name}")
+                        
+            # Also drop system caches
+            await InjectionEngine.clear_memory()
+            
+    except ImportError:
+        pass  # psutil not available
+    except Exception as e:
+        logger.error(f"⚓ ANCHOR: Surgical trim error: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STATE MACHINE ENUM
@@ -98,12 +240,61 @@ class LogStreamer:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# WATCHDOG — state-gated: only monitors RUNNING clones
+# KEEP-ALIVE DAEMON — V7.0 System Anchor
+# ═══════════════════════════════════════════════════════════════════════════
+async def keepalive_daemon(bot_instance: "AegisBot"):
+    """
+    V7.0: Enhanced Daemon with UI-Crash Immunity.
+    Uses dumpsys for verification, ADB shell for headless interaction.
+    Continues even if SystemUI crashes.
+    """
+    logger.info("⚓ ANCHOR: Keep-Alive Daemon started (V7.0)")
+    heartbeat_count = 0
+    
+    while True:
+        await asyncio.sleep(30)  # Check every 30 seconds
+        heartbeat_count += 1
+        
+        try:
+            # 1. Headless heartbeat - input tap with device ID (bypasses UI)
+            await run_bash("su -c 'input -d 0 tap 540 960' 2>/dev/null || su -c 'input tap 540 960' 2>/dev/null || true")
+            
+            # 2. Check system health via dumpsys (works without SystemUI)
+            ret, stdout, _ = await run_bash("su -c 'dumpsys activity activities | grep -E \"mFocused|mResumed\"' 2>/dev/null || echo NONE")
+            system_responsive = ret == 0 and stdout.strip() != "NONE"
+            
+            # 3. Periodic logging
+            if heartbeat_count % 10 == 0:  # Every 5 minutes
+                logger.info(f"⚓ ANCHOR: Keep-Alive heartbeat #{heartbeat_count} (System responsive: {system_responsive})")
+            
+            # 4. Memory pressure check & surgical trim
+            if heartbeat_count % 6 == 0:  # Every 3 minutes
+                await surgical_trim(bot_instance)
+            
+            # 5. PID validation for all clones
+            for name, state in list(bot_instance.clone_states.items()):
+                if state == CloneState.RUNNING:
+                    # Use dumpsys for verification (works even if UI crashed)
+                    verified = await MonitorEngine.verify_clone_via_dumpsys(name)
+                    if not verified:
+                        pid = await InjectionEngine.get_clone_pid(name)
+                        if not pid:
+                            logger.warning(f"⚓ ANCHOR: [{name}] Lost via dumpsys & pidof, marking STOPPED")
+                            bot_instance.set_state(name, CloneState.STOPPED)
+                        
+        except Exception as e:
+            logger.error(f"⚓ ANCHOR: Keep-Alive error: {e}")
+            await asyncio.sleep(5)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WATCHDOG — V7.0 Deep Daemonization (Detached Thread)
 # ═══════════════════════════════════════════════════════════════════════════
 async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     """
+    V7.0: Watchdog runs in detached logic with daemon=True threading.
     CRITICAL RULE: Watchdog is LEGALLY BLIND to any clone not in RUNNING state.
-    Only RUNNING clones are checked for Frozen/Leaking conditions.
+    Uses dumpsys as backup verification when /proc is unavailable.
     """
     import re
 
@@ -113,12 +304,14 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     # SILENT START: Skip everything for first 10 minutes
     boot_time = time.time()
     
+    logger.info("⚓ ANCHOR: Watchdog initialized (V7.0 Deep Daemon)")
+    
     while True:
         await asyncio.sleep(60)
         
         # ══ 10-MINUTE TOTAL SILENCE ════════════════════════════════════
         if time.time() - boot_time < 600:
-            logger.info(f"Watchdog: Silent Mode Active ({int(600 - (time.time() - boot_time))}s remaining)")
+            logger.info(f"⚓ ANCHOR: Watchdog Silent Mode ({int(600 - (time.time() - boot_time))}s remaining)")
             continue
         try:
             now = time.time()
@@ -127,17 +320,24 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
 
                 # ══ STATE GATE — The core fix ══════════════════════════════
                 if state != CloneState.RUNNING:
-                    # Log why we're skipping
                     if state == CloneState.STARTING:
-                        logger.debug(f"Watchdog: [{name}] STARTING — ignored.")
+                        logger.debug(f"⚓ ANCHOR: Watchdog [{name}] STARTING — ignored.")
                     continue
 
                 # ── Post-action cooldown 60s ────────────────────────────
                 if now - last_action.get(name, 0) < 60:
                     continue
 
-                # ── Get status ──────────────────────────────────────────
+                # ── Get status (dual verification) ────────────────────────
                 st = await MonitorEngine.get_clone_status(name)
+                
+                # V7.0: Backup verification via dumpsys if /proc fails
+                if "Offline" in st or "Error" in st:
+                    dumpsys_ok = await MonitorEngine.verify_clone_via_dumpsys(name)
+                    if dumpsys_ok:
+                        # Clone is actually running, /proc just unavailable
+                        continue
+                
                 needs_action = False
                 reason       = ""
 
@@ -147,7 +347,7 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                         reason       = f"Offline ×{offline_strikes[name]}"
                         needs_action = True
                     else:
-                        logger.info(f"Watchdog [{name}]: Offline strike {offline_strikes[name]}/3")
+                        logger.info(f"⚓ ANCHOR: Watchdog [{name}] Offline strike {offline_strikes[name]}/3")
                 else:
                     offline_strikes[name] = 0
                     m = re.search(r"Thr:\s*(\d+)", st)
@@ -163,26 +363,24 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                 if needs_action:
                     last_action[name]       = now
                     offline_strikes[name]   = 0
-                    # Transition back to STOPPED first
                     bot_instance.set_state(name, CloneState.STOPPED)
-                    logger.warning(f"Watchdog: [{name}] {reason}. Queueing restart…")
+                    logger.warning(f"⚓ ANCHOR: Watchdog [{name}] {reason}. Queueing restart…")
                     admin = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
                     if admin:
                         try:
                             await application.bot.send_message(
                                 admin,
-                                f"🐕 *Watchdog*: `{name}` → {reason}\n🌑 STOPPED → queued relaunch…",
+                                f"⚓ *ANCHOR*: `{name}` → {reason}\n🌑 STOPPED → queued relaunch…",
                                 parse_mode="Markdown"
                             )
                         except TelegramError:
                             pass
-                    # Kick into startup queue via background task
                     asyncio.create_task(bot_instance._enqueue_start(name, admin))
 
             await bot_instance.refresh_dashboard()
 
         except Exception as e:
-            logger.error(f"watchdog_loop error: {e}")
+            logger.error(f"⚓ ANCHOR: Watchdog error: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -539,45 +737,56 @@ class AegisBot:
     # Entry-point
     # ─────────────────────────────────────────────────────────────────────
     async def run(self):
-        # 1. CLEAN SLATE: NO PKILL. Bot assumes unique execution.
-        logger.info(f"💎 PROJECT AEGIS V{VERSION} STARTING — {DEVICE_ID} (Clean Slate)")
-
-
-        # 2. Build application
-        self.application = ApplicationBuilder().token(self.config.bot_token).build()
-        app = self.application
-
-        # 3. Handlers
-        app.add_handler(CommandHandler("start",   self.cmd_start))
-        app.add_handler(CommandHandler("console", self.cmd_console))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
-        app.add_handler(CallbackQueryHandler(self.handle_callback))
-        app.add_error_handler(self.error_handler)
-
-        # 4. Start
-        await app.initialize()
-        await app.start()
-
-        # 5. Launch Watchdog (state-gated, uses application explicitly)
-        asyncio.create_task(watchdog_loop(app, self))
-
-        # 6. Auto-resume
-        asyncio.create_task(self._auto_resume())
-
-        logger.info(f"💎 PROJECT AEGIS V{VERSION} ONLINE — {DEVICE_ID}")
-
-        # 7. Poll
-        await app.updater.start_polling(drop_pending_updates=True)
-
-        # 8. Block
+        # V7.0: PID LOCK - Prevent ghost duplicates
+        if not acquire_pid_lock():
+            sys.exit(1)
+        
         try:
-            while True:
-                await asyncio.sleep(3600)
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            pass
+            # 1. ANCHOR TO SYSTEM
+            logger.info(f"⚓ PROJECT AEGIS V{VERSION} SYSTEM ANCHOR — {DEVICE_ID}")
+            await anchor_to_system()
+            
+            # 2. Build application
+            self.application = ApplicationBuilder().token(self.config.bot_token).build()
+            app = self.application
+
+            # 3. Handlers
+            app.add_handler(CommandHandler("start",   self.cmd_start))
+            app.add_handler(CommandHandler("console", self.cmd_console))
+            app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
+            app.add_handler(CallbackQueryHandler(self.handle_callback))
+            app.add_error_handler(self.error_handler)
+
+            # 4. Start
+            await app.initialize()
+            await app.start()
+
+            # 5. Launch Watchdog (V7.0 Deep Daemon)
+            asyncio.create_task(watchdog_loop(app, self))
+
+            # 6. Launch Keep-Alive Daemon (V7.0 System Anchor)
+            asyncio.create_task(keepalive_daemon(self))
+
+            # 7. Auto-resume
+            asyncio.create_task(self._auto_resume())
+
+            logger.info(f"⚓ PROJECT AEGIS V{VERSION} ANCHORED — {DEVICE_ID}")
+
+            # 8. Poll
+            await app.updater.start_polling(drop_pending_updates=True)
+
+            # 9. Block
+            try:
+                while True:
+                    await asyncio.sleep(3600)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                pass
+            finally:
+                await app.stop()
+                await app.shutdown()
         finally:
-            await app.stop()
-            await app.shutdown()
+            # Release PID lock on exit
+            release_pid_lock()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

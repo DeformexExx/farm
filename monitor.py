@@ -1,11 +1,62 @@
 # -*- coding: utf-8 -*-
 import os
 import logging
+from typing import Optional
 from bash_utils import run_bash
 
 logger = logging.getLogger("MonitorEngine")
 
 class MonitorEngine:
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # PID TRACKING — V6.0 Daemon Mode
+    # ═══════════════════════════════════════════════════════════════════════
+    _pid_cache: dict = {}  # {clone_name: pid}
+    
+    @staticmethod
+    async def get_clone_pid(clone_name: str) -> str:
+        """Get specific PID for a clone package. Returns empty string if not running."""
+        package = f"com.roblox.{clone_name}"
+        ret, stdout, _ = await run_bash(f"su -c 'pidof {package}'")
+        if ret == 0 and stdout.strip():
+            pid = stdout.strip().split()[0]
+            MonitorEngine._pid_cache[clone_name] = pid
+            return pid
+        MonitorEngine._pid_cache.pop(clone_name, None)
+        return ""
+    
+    @staticmethod
+    async def get_cached_pid(clone_name: str) -> str:
+        """Get cached PID or refresh if not in cache."""
+        if clone_name in MonitorEngine._pid_cache:
+            # Verify still alive
+            pid = MonitorEngine._pid_cache[clone_name]
+            ret, _, _ = await run_bash(f"su -c 'kill -0 {pid} 2>/dev/null && echo ALIVE || echo DEAD'")
+            if "ALIVE" in ret:
+                return pid
+            # PID died, remove from cache
+            MonitorEngine._pid_cache.pop(clone_name, None)
+        return await MonitorEngine.get_clone_pid(clone_name)
+
+    @staticmethod
+    async def verify_clone_via_dumpsys(clone_name: str) -> bool:
+        """
+        V7.0: UI-Crash Immunity - Verify clone via dumpsys activity.
+        Works even when /proc is inaccessible or SystemUI crashed.
+        """
+        package = f"com.roblox.{clone_name}"
+        try:
+            ret, stdout, _ = await run_bash(
+                f"su -c 'dumpsys activity activities | grep -i {package}'"
+            )
+            if ret == 0 and stdout.strip():
+                if any(kw in stdout.lower() for kw in ['resumed', 'visible', 'foreground']):
+                    return True
+            return False
+        except Exception as e:
+            logger.error(f"⚓ ANCHOR: dumpsys verification error for {clone_name}: {e}")
+            return False
+
     @staticmethod
     async def get_system_stats() -> tuple[str, str, str]:
         """Возвращает (RAM_str, CPU_str, TEMP_str)"""

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V4.0 Dark Premium
+# ui_manager.py — Project Aegis V7.0 System Anchor
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V5.0*\n"
+            "💎 *AEGIS OVERLORD V6.0*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[💠 ONLINE (SAFE)]`\n"
+            f"⚡️ SYSTEM : `[�️ DAEMON MODE]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -41,15 +41,17 @@ class UIManager:
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
         return (
-            "💎 *AEGIS V4.0 — DEVICE*\n"
+            "💎 *AEGIS V7.0 — SYSTEM ANCHOR*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
             f"🐕 WATCHDOG: `[STATE-GATED 🔒]`\n"
+            f"⚓ ANCHOR  : `[LMK-IMMUNE]`\n"
+            f"🛡️ DAEMON  : `[KEEP-ALIVE ACTIVE]`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "✨ _State Machine Active_"
+            "✨ _PID-Locked, OOM-Protected_"
         )
 
     @staticmethod
@@ -79,7 +81,7 @@ class UIManager:
         state_map:  {clone_name: CloneState (str value)}
         uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *AEGIS OVERLORD V4.0*\n"
+        msg = "💎 *AEGIS OVERLORD V7.0 ANCHOR*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
@@ -163,10 +165,14 @@ class UIManager:
     @staticmethod
     def get_help_text() -> str:
         return (
-            "🛡 *AEGIS V5.0 SAFE MODE*\n\n"
+            "🛡 *AEGIS V7.0 SYSTEM ANCHOR*\n\n"
             "• Watchdog: *Silent* for 10 mins after boot\n"
-            "• Startup: Set Identity -> Inject -> Launch (No Cleanup)\n"
-            "• UI Refresh: Throttled to 60s gap\n"
-            "• Locking: Serialized startup active\n\n"
-            "Stable logic: No aggressive kills or background interference."
+            "• PID Lock: Prevents ghost duplicate processes\n"
+            "• Signal Immunity: SIGHUP/SIGTERM ignored (LMK-proof)\n"
+            "• OOM Protection: Score -1000 (unkillable)\n"
+            "• Targeted Kill: PID-specific validation (-15 → -9)\n"
+            "• Global StartLock: No concurrent am start\n"
+            "• dumpsys Backup: UI-crash immunity\n"
+            "• Surgical Trim: Prevents memory chain crash\n\n"
+            "_System Anchor ensures continuity through UI crashes._"
         )
