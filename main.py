@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V7.1 Active Supervisor Tuning
+# main.py — Project Aegis V7.4 Scheduled Maintenance
 import os
 import sys
 import enum
@@ -9,6 +9,7 @@ import time
 import signal
 import threading
 from typing import Optional, Dict
+from datetime import datetime, timedelta
 
 # ── ABSOLUTE PATH LOCK ─────────────────────────────────────────────────────
 _bot_dir = os.path.dirname(os.path.abspath(__file__))
@@ -32,7 +33,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "7.1"
+VERSION = "7.4"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -52,7 +53,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV71")
+logger = logging.getLogger("AegisV74")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -351,11 +352,107 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# WATCHDOG — V7.0 Deep Daemonization (Detached Thread)
+# DAILY RESTART DAEMON — V7.4 Scheduled Maintenance (05:00 local time)
+# ═══════════════════════════════════════════════════════════════════════════
+async def daily_restart_daemon(bot_instance: "AegisBot"):
+    """
+    V7.4: Automatically restarts all running clones at 05:00 local time.
+    Each restarted clone gets the standard 600s immunity window after launch.
+    """
+    from datetime import datetime, timedelta
+    
+    logger.info("🕐 DAILY RESTART: Daemon started (V7.4 - 05:00 local time)")
+    
+    while True:
+        now = datetime.now()
+        # Calculate time until next 05:00
+        target = now.replace(hour=5, minute=0, second=0, microsecond=0)
+        if now >= target:
+            # Already past 05:00 today, schedule for tomorrow
+            target = target + timedelta(days=1)
+        
+        wait_seconds = (target - now).total_seconds()
+        logger.info(f"🕐 DAILY RESTART: Next restart at {target.strftime('%Y-%m-%d %H:%M')} (in {int(wait_seconds/3600)}h {int((wait_seconds%3600)/60)}m)")
+        
+        await asyncio.sleep(wait_seconds)
+        
+        # It's 05:00 - perform daily restart
+        logger.info("🕐 DAILY RESTART: Triggering sequential restart of all running clones")
+        admin_id = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
+        
+        if admin_id and bot_instance.application:
+            try:
+                await bot_instance.application.bot.send_message(
+                    admin_id,
+                    "🕐 *Daily Restart (05:00)*\nRestarting all running clones sequentially...",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+        
+        # Get list of currently running clones
+        running_clones = [
+            name for name, state in bot_instance.clone_states.items()
+            if state == CloneState.RUNNING
+        ]
+        
+        if not running_clones:
+            logger.info("🕐 DAILY RESTART: No clones currently running")
+            if admin_id and bot_instance.application:
+                try:
+                    await bot_instance.application.bot.send_message(
+                        admin_id, "🕐 Daily Restart: No clones were running", parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+            continue
+        
+        # Sequential restart with 60s gap (same as mass_start)
+        for idx, name in enumerate(running_clones, 1):
+            logger.info(f"🕐 DAILY RESTART: [{idx}/{len(running_clones)}] Restarting {name}")
+            
+            if admin_id and bot_instance.application:
+                try:
+                    await bot_instance.application.bot.send_message(
+                        admin_id,
+                        f"🕐 *Daily Restart [{idx}/{len(running_clones)}]*: `{name}`",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+            
+            # Stop the clone (this triggers Smart Pause)
+            await bot_instance._stop_clone(name, admin_id)
+            
+            # Wait for Smart Pause to complete (30s) + small buffer
+            await asyncio.sleep(35)
+            
+            # Start the clone (600s immunity window applied automatically)
+            await bot_instance._enqueue_start(name, admin_id)
+            
+            # 60s gap between clones
+            if idx < len(running_clones):
+                await asyncio.sleep(60)
+        
+        logger.info("🕐 DAILY RESTART: Complete")
+        if admin_id and bot_instance.application:
+            try:
+                await bot_instance.application.bot.send_message(
+                    admin_id,
+                    f"✅ *Daily Restart Complete*\n{len(running_clones)} clones restarted with 600s immunity",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WATCHDOG — V7.2 Final Sensor Calibration
 # ═══════════════════════════════════════════════════════════════════════════
 async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     """
-    V7.1: Active Supervisor Tuning — Aggressive freeze detection and rapid response.
+    V7.2: Final Sensor Calibration — Reduced false positives with x10 tolerance.
+    Features: 600s immunity window, enhanced log parsing, [SCANNING...] status.
     CRITICAL RULE: Watchdog is LEGALLY BLIND to any clone not in RUNNING state.
     Uses dumpsys as backup verification when /proc is unavailable.
     """
@@ -388,8 +485,22 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                         logger.debug(f"⚓ ANCHOR: Watchdog [{name}] STARTING — ignored.")
                     continue
 
+                # ── V7.3: Smart Pause check ───────────────────────────────
+                pause_until = bot_instance.manual_pause.get(name, 0)
+                pause_remaining = pause_until - time.time()
+                if pause_remaining > 0:
+                    logger.debug(f"⚓ ANCHOR: Watchdog [{name}] SMART PAUSE ({int(pause_remaining)}s remaining) — skipped")
+                    continue
+
                 # ── Post-action cooldown 60s ────────────────────────────
                 if now - last_action.get(name, 0) < 60:
+                    continue
+
+                # ── V7.2: 600-second immunity window ────────────────────
+                start_time = bot_instance.clone_start_time.get(name, 0)
+                immunity_remaining = 600 - (now - start_time)
+                if immunity_remaining > 0:
+                    logger.debug(f"⚓ ANCHOR: Watchdog [{name}] IMMUNITY WINDOW ({int(immunity_remaining)}s remaining) — skipped")
                     continue
 
                 # ── Get status (dual verification) ────────────────────────
@@ -402,27 +513,27 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                         # Clone is actually running, /proc just unavailable
                         continue
                 
-                # V7.1 AGGRESSIVE FREEZE DETECTION ─────────────────────────
+                # V7.2 AGGRESSIVE FREEZE DETECTION — Calibrated (x10 tolerance)
                 needs_action = False
                 reason       = ""
                 
                 # Check thread-based freeze (0 threads or unchanged for 180s)
                 if MonitorEngine.is_thread_frozen(name):
                     freeze_strikes[name] = freeze_strikes.get(name, 0) + 1
-                    if freeze_strikes[name] >= 2:  # Require 2 confirmations
+                    if freeze_strikes[name] >= 10:  # V7.2: Changed from 2 to 10 (x10 tolerance)
                         reason = f"FROZEN (Thread stall ×{freeze_strikes[name]})"
                         needs_action = True
                     else:
-                        logger.warning(f"🧊 [{name}] Freeze strike {freeze_strikes[name]}/2 (thread stall)")
+                        logger.warning(f"🧊 [{name}] Freeze strike {freeze_strikes[name]}/10 (thread stall)")
                 
                 # Check CPU-based freeze (<1% for 120s)
                 elif MonitorEngine.is_cpu_frozen(name):
                     freeze_strikes[name] = freeze_strikes.get(name, 0) + 1
-                    if freeze_strikes[name] >= 2:
+                    if freeze_strikes[name] >= 10:  # V7.2: Changed from 2 to 10
                         reason = f"FROZEN (CPU stall ×{freeze_strikes[name]})"
                         needs_action = True
                     else:
-                        logger.warning(f"🧊 [{name}] Freeze strike {freeze_strikes[name]}/2 (CPU stall)")
+                        logger.warning(f"🧊 [{name}] Freeze strike {freeze_strikes[name]}/10 (CPU stall)")
                 else:
                     freeze_strikes[name] = 0  # Reset on healthy readings
 
@@ -493,6 +604,12 @@ class AegisBot:
         # Uptime tracking: {clone_name: timestamp when RUNNING reached}
         self.running_since: Dict[str, float] = {}
 
+        # V7.2: Clone immunity window tracking — {clone_name: timestamp when started}
+        self.clone_start_time: Dict[str, float] = {}
+
+        # V7.3: Smart Pause tracking — {clone_name: pause_until_timestamp}
+        self.manual_pause: Dict[str, float] = {}
+
         # asyncio.Lock — only ONE clone in STARTING state at a time
         self._start_lock = asyncio.Lock()
 
@@ -508,8 +625,11 @@ class AegisBot:
         self.clone_states[name] = state
         if state == CloneState.RUNNING:
             self.running_since[name] = time.time()
+            # V7.2: Record when clone became RUNNING for immunity window
+            self.clone_start_time[name] = time.time()
         elif old == CloneState.RUNNING:
             self.running_since.pop(name, None)
+            # Keep clone_start_time for immunity tracking even after stopping
         logger.info(f"State [{name}]: {old.value} → {state.value}")
 
     # ── Admin guard ───────────────────────────────────────────────────────
@@ -687,6 +807,13 @@ class AegisBot:
             logger.info(f"_enqueue_start: [{name}] already STARTING. Skip.")
             return
 
+        # V7.3: Cancel Smart Pause if active (user started clone early)
+        if name in self.manual_pause:
+            remaining = self.manual_pause[name] - time.time()
+            if remaining > 0:
+                logger.info(f"🚀 [{name}] Smart Pause cancelled early ({int(remaining)}s remaining)")
+            self.manual_pause.pop(name, None)
+
         async with self._start_lock:
             # ── 1. Force Identity & Inject ──────────────────────────────
             self.set_state(name, CloneState.STARTING)
@@ -734,16 +861,67 @@ class AegisBot:
 
     async def _stop_clone(self, name: Optional[str], chat_id):
         if not name: return
+        
+        # V7.3: Trigger Smart Pause — disable watchdog for 30 seconds
+        # NOTE: During this 30s window, the watchdog will NOT kill the clone
+        # even if it appears to still be running. This prevents the race condition
+        # where watchdog detects the clone as "frozen" while it's gracefully shutting down.
+        pause_until = time.time() + 30
+        self.manual_pause[name] = pause_until
+        logger.info(f"🛑 [{name}] SMART PAUSE triggered — watchdog disabled for 30s")
+        
         self.set_state(name, CloneState.STOPPED)
         self.persistence.remove_target(name)
         await InjectionEngine.stop(name)
+        
+        # V7.3: Schedule delayed check after 30 seconds
+        asyncio.create_task(self._smart_pause_check(name, chat_id))
+        
         if chat_id and self.application:
             try:
                 await self.application.bot.send_message(
-                    chat_id, f"🌑 `{name}` stopped.", parse_mode="Markdown")
+                    chat_id, f"🌑 `{name}` stopped.\n⏱️ Smart Pause: 30s watchdog immunity", parse_mode="Markdown")
             except Exception:
                 pass
         await self.refresh_dashboard(force=True)
+
+    async def _smart_pause_check(self, name: str, chat_id: Optional[int]):
+        """
+        V7.3: After 30s Smart Pause, check if clone is still running.
+        If yes — it failed to stop, perform surgical kill.
+        SAFETY: Skip if pause was cancelled early (user started clone).
+        """
+        await asyncio.sleep(30)
+        
+        # SAFETY CHECK: Verify pause is still active (wasn't cancelled early)
+        if name not in self.manual_pause:
+            logger.info(f"🛑 [{name}] Smart Pause was cancelled early — skipping surgical kill check")
+            return
+        
+        # Clear the pause (normal operation resumes)
+        self.manual_pause.pop(name, None)
+        
+        # Check if clone is still running
+        pid = await InjectionEngine.get_clone_pid(name)
+        if pid:
+            logger.warning(f"🛑 [{name}] Still running after Smart Pause — performing surgical kill")
+            await InjectionEngine.kill_by_pid(pid, name)
+            
+            # Double-check
+            await asyncio.sleep(2)
+            pid = await InjectionEngine.get_clone_pid(name)
+            if pid:
+                logger.error(f"🛑 [{name}] Surgical kill failed — force killing")
+                await run_bash(f"su -c 'kill -9 {pid}'")
+            
+            if chat_id and self.application:
+                try:
+                    await self.application.bot.send_message(
+                        chat_id, f"🚨 `{name}` required surgical kill after failed stop.", parse_mode="Markdown")
+                except Exception:
+                    pass
+        else:
+            logger.info(f"🛑 [{name}] Smart Pause ended — clone properly stopped")
 
     # ─────────────────────────────────────────────────────────────────────
     # Auto-resume on startup
@@ -839,7 +1017,7 @@ class AegisBot:
         
         try:
             # 1. ANCHOR TO SYSTEM
-            logger.info(f"⚓ PROJECT AEGIS V{VERSION} SYSTEM ANCHOR — {DEVICE_ID}")
+            logger.info(f"⚓ PROJECT AEGIS V7.4 SCHEDULED MAINTENANCE — {DEVICE_ID}")
             await anchor_to_system()
             
             # 2. Build application
@@ -857,7 +1035,7 @@ class AegisBot:
             await app.initialize()
             await app.start()
 
-            # 5. Launch Watchdog (V7.1 Active Supervisor)
+            # 5. Launch Watchdog (V7.3 Smart Pause)
             asyncio.create_task(watchdog_loop(app, self))
 
             # 6. Launch Keep-Alive Daemon (V7.1 System Anchor)
@@ -866,10 +1044,13 @@ class AegisBot:
             # 6.5 Launch Telemetry Daemon (V7.1 Active Supervisor)
             asyncio.create_task(telemetry_daemon(self))
 
+            # 6.6 Launch Daily Restart Daemon (V7.4 Scheduled Maintenance)
+            asyncio.create_task(daily_restart_daemon(self))
+
             # 7. Auto-resume
             asyncio.create_task(self._auto_resume())
 
-            logger.info(f"⚓ PROJECT AEGIS V{VERSION} ANCHORED — {DEVICE_ID}")
+            logger.info(f"⚓ PROJECT AEGIS V7.4 ANCHORED — {DEVICE_ID}")
 
             # 8. Poll
             await app.updater.start_polling(drop_pending_updates=True)

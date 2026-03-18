@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V7.1 Active Supervisor Tuning
+# ui_manager.py — Project Aegis V7.4 Scheduled Maintenance
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V7.1*\n"
+            "💎 *AEGIS OVERLORD V7.4*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[🎯 ACTIVE SUPERVISOR]`\n"
+            f"⚡️ SYSTEM : `[🕐 SCHEDULED MAINTENANCE]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -41,18 +41,18 @@ class UIManager:
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
         return (
-            "💎 *AEGIS V7.1 — ACTIVE SUPERVISOR*\n"
+            "💎 *AEGIS V7.4 — SCHEDULED MAINTENANCE*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
-            f"🐕 WATCHDOG: `[AGGRESSIVE FREEZE DETECT �]`\n"
+            f"🐕 WATCHDOG: `[x10 TOLERANCE + SMART PAUSE 🔥]`\n"
             f"⚓ ANCHOR  : `[LMK-IMMUNE]`\n"
-            f"� TELEMETRY: `[15s INTERVAL]`\n"
-            f"�🛡️ DAEMON  : `[KEEP-ALIVE ACTIVE]`\n"
+            f"� RESTART : `[05:00 DAILY AUTO-RESTART]`\n"
+            f"⏱️ PAUSE   : `[30s MANUAL STOP IMMUNITY]`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "✨ _Thread Telemetry + CPU Freeze Detection_"
+            "✨ _Automated Daily Health Management_"
         )
 
     @staticmethod
@@ -83,7 +83,7 @@ class UIManager:
         state_map:  {clone_name: CloneState (str value)}
         uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *AEGIS OVERLORD V7.1 ACTIVE SUPERVISOR*\n"
+        msg = "💎 *AEGIS OVERLORD V7.4 SCHEDULED MAINTENANCE*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
@@ -167,15 +167,13 @@ class UIManager:
     @staticmethod
     def get_help_text() -> str:
         return (
-            "🛡 *AEGIS V7.1 ACTIVE SUPERVISOR TUNING*\n\n"
-            "• Watchdog: *Aggressive freeze detection* (180s thread stall / 120s CPU <1%)\n"
-            "• Thread Telemetry: Log-file fallback when /proc fails\n"
-            "• PID Lock: Prevents ghost duplicate processes\n"
+            "🛡 *AEGIS V7.4 SCHEDULED MAINTENANCE*\n\n"
+            "• Daily Restart: *05:00 local time* — all running clones\n"
+            "• Smart Pause: *30s watchdog disable* on manual stop\n"
+            "• Watchdog: *x10 tolerance* (10 strikes before action)\n"
+            "• Immunity Window: 600s protection after any restart\n"
             "• Signal Immunity: SIGHUP/SIGTERM ignored (LMK-proof)\n"
             "• OOM Protection: Score -1000 (unkillable)\n"
-            "• Targeted Kill: PID-specific validation (-15 → -9)\n"
-            "• Global StartLock: No concurrent am start\n"
-            "• Force Redraw: System UI bypass when launcher hangs\n"
-            "• Surgical Trim: Prevents memory chain crash\n\n"
-            "_Active Supervisor aggressively detects and recovers frozen clones._"
+            "• Targeted Kill: PID-specific validation (-15 → -9)\n\n"
+            "_V7.4 ensures your clones are fresh every morning._"
         )
