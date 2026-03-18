@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V7.4 Scheduled Maintenance
+# ui_manager.py — Project Aegis V8.0 Hard-Core System Critical
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V7.4*\n"
+            "💎 *AEGIS OVERLORD V8.0*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[🕐 SCHEDULED MAINTENANCE]`\n"
+            f"⚡️ SYSTEM : `[☠️ SYSTEM CRITICAL]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -41,18 +41,18 @@ class UIManager:
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
         return (
-            "💎 *AEGIS V7.4 — SCHEDULED MAINTENANCE*\n"
+            "💎 *AEGIS V8.0 — SYSTEM CRITICAL*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
-            f"🐕 WATCHDOG: `[x10 TOLERANCE + SMART PAUSE 🔥]`\n"
-            f"⚓ ANCHOR  : `[LMK-IMMUNE]`\n"
-            f"� RESTART : `[05:00 DAILY AUTO-RESTART]`\n"
-            f"⏱️ PAUSE   : `[30s MANUAL STOP IMMUNITY]`\n"
+            f"� STATUS  : `[IMMORTAL - OOM PROTECTED]`\n"
+            f"👻 GHOST   : `[WATCHER ACTIVE]`\n"
+            f"🕐 RESTART : `[05:00 DAILY]`\n"
+            f"⏱️ PAUSE   : `[30s SMART PAUSE]`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "✨ _Automated Daily Health Management_"
+            "☠️ _Android can't kill me. I am the system now._"
         )
 
     @staticmethod
@@ -83,7 +83,7 @@ class UIManager:
         state_map:  {clone_name: CloneState (str value)}
         uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *AEGIS OVERLORD V7.4 SCHEDULED MAINTENANCE*\n"
+        msg = "💎 *AEGIS OVERLORD V8.0 SYSTEM CRITICAL*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
@@ -167,13 +167,14 @@ class UIManager:
     @staticmethod
     def get_help_text() -> str:
         return (
-            "🛡 *AEGIS V7.4 SCHEDULED MAINTENANCE*\n\n"
-            "• Daily Restart: *05:00 local time* — all running clones\n"
-            "• Smart Pause: *30s watchdog disable* on manual stop\n"
-            "• Watchdog: *x10 tolerance* (10 strikes before action)\n"
-            "• Immunity Window: 600s protection after any restart\n"
-            "• Signal Immunity: SIGHUP/SIGTERM ignored (LMK-proof)\n"
-            "• OOM Protection: Score -1000 (unkillable)\n"
-            "• Targeted Kill: PID-specific validation (-15 → -9)\n\n"
-            "_V7.4 ensures your clones are fresh every morning._"
+            "� *AEGIS V8.0 HARD-CORE SYSTEM CRITICAL*\n\n"
+            "• OOM Protection: *-1000 score* (IMMORTAL to Android)\n"
+            "• Ghost Watch: *External monitor* auto-restarts bot if killed\n"
+            "• Interface Isolation: *Pure Shell Mode* when SystemUI crashes\n"
+            "• Emergency RAM: *STOP/CONT* clones when <100MB free\n"
+            "• PID Recovery: *Re-adopts* existing clones after crash\n"
+            "• Daily Restart: *05:00* sequential maintenance\n"
+            "• Smart Pause: *30s* watchdog immunity on stop\n"
+            "• Watchdog: *x10 tolerance* freeze detection\n\n"
+            "_V8.0: Android can't kill me. I am the system now._"
         )
