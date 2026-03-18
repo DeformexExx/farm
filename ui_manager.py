@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V7.0 System Anchor
+# ui_manager.py — Project Aegis V7.1 Active Supervisor Tuning
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V6.0*\n"
+            "💎 *AEGIS OVERLORD V7.1*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[�️ DAEMON MODE]`\n"
+            f"⚡️ SYSTEM : `[🎯 ACTIVE SUPERVISOR]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -41,17 +41,18 @@ class UIManager:
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
         return (
-            "💎 *AEGIS V7.0 — SYSTEM ANCHOR*\n"
+            "💎 *AEGIS V7.1 — ACTIVE SUPERVISOR*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
-            f"🐕 WATCHDOG: `[STATE-GATED 🔒]`\n"
+            f"🐕 WATCHDOG: `[AGGRESSIVE FREEZE DETECT �]`\n"
             f"⚓ ANCHOR  : `[LMK-IMMUNE]`\n"
-            f"🛡️ DAEMON  : `[KEEP-ALIVE ACTIVE]`\n"
+            f"� TELEMETRY: `[15s INTERVAL]`\n"
+            f"�🛡️ DAEMON  : `[KEEP-ALIVE ACTIVE]`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "✨ _PID-Locked, OOM-Protected_"
+            "✨ _Thread Telemetry + CPU Freeze Detection_"
         )
 
     @staticmethod
@@ -70,6 +71,7 @@ class UIManager:
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(f"📟 CONSOLE: {c}",      callback_data="toggle_console")],
             [InlineKeyboardButton(f"🔄 AUTO-RESTORE: {r}", callback_data="toggle_restore")],
+            [InlineKeyboardButton("🔄 FORCE REDRAW",     callback_data="sys_force_redraw")],
             [InlineKeyboardButton("❓ HELP",                callback_data="sys_help")],
             [InlineKeyboardButton("🏠 BACK",               callback_data="nav_home")],
         ])
@@ -81,7 +83,7 @@ class UIManager:
         state_map:  {clone_name: CloneState (str value)}
         uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *AEGIS OVERLORD V7.0 ANCHOR*\n"
+        msg = "💎 *AEGIS OVERLORD V7.1 ACTIVE SUPERVISOR*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
@@ -165,14 +167,15 @@ class UIManager:
     @staticmethod
     def get_help_text() -> str:
         return (
-            "🛡 *AEGIS V7.0 SYSTEM ANCHOR*\n\n"
-            "• Watchdog: *Silent* for 10 mins after boot\n"
+            "🛡 *AEGIS V7.1 ACTIVE SUPERVISOR TUNING*\n\n"
+            "• Watchdog: *Aggressive freeze detection* (180s thread stall / 120s CPU <1%)\n"
+            "• Thread Telemetry: Log-file fallback when /proc fails\n"
             "• PID Lock: Prevents ghost duplicate processes\n"
             "• Signal Immunity: SIGHUP/SIGTERM ignored (LMK-proof)\n"
             "• OOM Protection: Score -1000 (unkillable)\n"
             "• Targeted Kill: PID-specific validation (-15 → -9)\n"
             "• Global StartLock: No concurrent am start\n"
-            "• dumpsys Backup: UI-crash immunity\n"
+            "• Force Redraw: System UI bypass when launcher hangs\n"
             "• Surgical Trim: Prevents memory chain crash\n\n"
-            "_System Anchor ensures continuity through UI crashes._"
+            "_Active Supervisor aggressively detects and recovers frozen clones._"
         )

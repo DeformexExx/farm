@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V7.0 System Anchor Architecture
+# main.py — Project Aegis V7.1 Active Supervisor Tuning
 import os
 import sys
 import enum
@@ -32,7 +32,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "7.0"
+VERSION = "7.1"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -52,7 +52,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV70")
+logger = logging.getLogger("AegisV71")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -240,15 +240,78 @@ class LogStreamer:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# KEEP-ALIVE DAEMON — V7.0 System Anchor
+# TELEMETRY DAEMON — V7.1 Active Supervisor (15s interval)
 # ═══════════════════════════════════════════════════════════════════════════
+async def telemetry_daemon(bot_instance: "AegisBot"):
+    """
+    V7.1: Collects thread and CPU telemetry every 15 seconds for freeze detection.
+    This runs independently to ensure data is always fresh for the watchdog.
+    """
+    logger.info("📊 TELEMETRY: Daemon started (V7.1 - 15s interval)")
+    cycle = 0
+    
+    while True:
+        await asyncio.sleep(15)  # 15 second interval
+        cycle += 1
+        
+        try:
+            for name, state in list(bot_instance.clone_states.items()):
+                if state == CloneState.RUNNING:
+                    pid = await InjectionEngine.get_clone_pid(name)
+                    if pid:
+                        # Collect thread count (with fallback)
+                        thread_count, source = await MonitorEngine.get_thread_count_fallback(name, pid)
+                        MonitorEngine.record_thread_history(name, thread_count)
+                        
+                        # Collect CPU usage
+                        cpu = await MonitorEngine.get_clone_cpu_usage(name, pid)
+                        if cpu >= 0:
+                            MonitorEngine.record_cpu_history(name, cpu)
+                        
+                        # Log every 4 cycles (1 minute)
+                        if cycle % 4 == 0:
+                            logger.debug(f"📊 [{name}] Threads: {thread_count} ({source}), CPU: {cpu:.1f}%")
+                    else:
+                        # PID lost but state is RUNNING - mark STOPPED
+                        logger.warning(f"📊 [{name}] PID lost during telemetry, marking STOPPED")
+                        bot_instance.set_state(name, CloneState.STOPPED)
+                        
+        except Exception as e:
+            logger.error(f"📊 TELEMETRY error: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FORCE REDRAW — V7.1 System UI Bypass
+# ═══════════════════════════════════════════════════════════════════════════
+async def force_redraw() -> bool:
+    """
+    V7.1: Force UI redraw to unfreeze Android Launcher/SystemUI.
+    Uses service call activity 42 or am restart for safe system nudge.
+    """
+    try:
+        # Method 1: Send refresh broadcast (safe, doesn't kill anything)
+        await run_bash("su -c 'am broadcast -a android.intent.action.SCREEN_OFF'")
+        await asyncio.sleep(0.5)
+        await run_bash("su -c 'am broadcast -a android.intent.action.SCREEN_ON'")
+        
+        # Method 2: Activity manager nudge
+        await run_bash("su -c 'service call activity 42 i32 0' 2>/dev/null || true")
+        
+        # Method 3: Input keyevent to wake up the system
+        await run_bash("su -c 'input keyevent 82' 2>/dev/null || true")  # Menu key
+        
+        logger.info("🔄 FORCE REDRAW: System UI nudge executed")
+        return True
+    except Exception as e:
+        logger.error(f"🔄 FORCE REDRAW failed: {e}")
+        return False
 async def keepalive_daemon(bot_instance: "AegisBot"):
     """
-    V7.0: Enhanced Daemon with UI-Crash Immunity.
+    V7.1: Enhanced Daemon with UI-Crash Immunity and Telemetry.
     Uses dumpsys for verification, ADB shell for headless interaction.
     Continues even if SystemUI crashes.
     """
-    logger.info("⚓ ANCHOR: Keep-Alive Daemon started (V7.0)")
+    logger.info("⚓ ANCHOR: Keep-Alive Daemon started (V7.1)")
     heartbeat_count = 0
     
     while True:
@@ -292,7 +355,7 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
 # ═══════════════════════════════════════════════════════════════════════════
 async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     """
-    V7.0: Watchdog runs in detached logic with daemon=True threading.
+    V7.1: Active Supervisor Tuning — Aggressive freeze detection and rapid response.
     CRITICAL RULE: Watchdog is LEGALLY BLIND to any clone not in RUNNING state.
     Uses dumpsys as backup verification when /proc is unavailable.
     """
@@ -300,11 +363,12 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
 
     offline_strikes: Dict[str, int]   = {}
     last_action:     Dict[str, float] = {}
+    freeze_strikes:  Dict[str, int]   = {}  # V7.1: Track freeze detection confidence
 
     # SILENT START: Skip everything for first 10 minutes
     boot_time = time.time()
     
-    logger.info("⚓ ANCHOR: Watchdog initialized (V7.0 Deep Daemon)")
+    logger.info("⚓ ANCHOR: Watchdog initialized (V7.1 Active Supervisor)")
     
     while True:
         await asyncio.sleep(60)
@@ -338,31 +402,56 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                         # Clone is actually running, /proc just unavailable
                         continue
                 
+                # V7.1 AGGRESSIVE FREEZE DETECTION ─────────────────────────
                 needs_action = False
                 reason       = ""
-
-                if "Offline" in st:
-                    offline_strikes[name] = offline_strikes.get(name, 0) + 1
-                    if offline_strikes[name] >= 3:
-                        reason       = f"Offline ×{offline_strikes[name]}"
+                
+                # Check thread-based freeze (0 threads or unchanged for 180s)
+                if MonitorEngine.is_thread_frozen(name):
+                    freeze_strikes[name] = freeze_strikes.get(name, 0) + 1
+                    if freeze_strikes[name] >= 2:  # Require 2 confirmations
+                        reason = f"FROZEN (Thread stall ×{freeze_strikes[name]})"
                         needs_action = True
                     else:
-                        logger.info(f"⚓ ANCHOR: Watchdog [{name}] Offline strike {offline_strikes[name]}/3")
+                        logger.warning(f"🧊 [{name}] Freeze strike {freeze_strikes[name]}/2 (thread stall)")
+                
+                # Check CPU-based freeze (<1% for 120s)
+                elif MonitorEngine.is_cpu_frozen(name):
+                    freeze_strikes[name] = freeze_strikes.get(name, 0) + 1
+                    if freeze_strikes[name] >= 2:
+                        reason = f"FROZEN (CPU stall ×{freeze_strikes[name]})"
+                        needs_action = True
+                    else:
+                        logger.warning(f"🧊 [{name}] Freeze strike {freeze_strikes[name]}/2 (CPU stall)")
                 else:
-                    offline_strikes[name] = 0
-                    m = re.search(r"Thr:\s*(\d+)", st)
-                    if m:
-                        thr = int(m.group(1))
-                        if thr < 130:
-                            reason       = f"Frozen (Thr:{thr})"
+                    freeze_strikes[name] = 0  # Reset on healthy readings
+
+                # Standard offline detection
+                if not needs_action:
+                    if "Offline" in st:
+                        offline_strikes[name] = offline_strikes.get(name, 0) + 1
+                        if offline_strikes[name] >= 3:
+                            reason       = f"Offline ×{offline_strikes[name]}"
                             needs_action = True
-                        elif thr > 500:
-                            reason       = f"Leaking (Thr:{thr})"
-                            needs_action = True
+                        else:
+                            logger.info(f"⚓ ANCHOR: Watchdog [{name}] Offline strike {offline_strikes[name]}/3")
+                    else:
+                        offline_strikes[name] = 0
+                        # Traditional thread count bounds check
+                        m = re.search(r"Thr:\s*(\d+)", st)
+                        if m:
+                            thr = int(m.group(1))
+                            if 0 < thr < 130:  # Only trigger if > 0 (0 handled by freeze detection)
+                                reason       = f"Low threads (Thr:{thr})"
+                                needs_action = True
+                            elif thr > 500:
+                                reason       = f"Leaking (Thr:{thr})"
+                                needs_action = True
 
                 if needs_action:
                     last_action[name]       = now
                     offline_strikes[name]   = 0
+                    freeze_strikes[name]    = 0
                     bot_instance.set_state(name, CloneState.STOPPED)
                     logger.warning(f"⚓ ANCHOR: Watchdog [{name}] {reason}. Queueing restart…")
                     admin = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
@@ -531,6 +620,13 @@ class AegisBot:
             elif d == "sys_sync":  await self._git_sync(chat)
             elif d == "sys_screenshot": await self._take_screenshot(q.message)
             elif d == "sys_help": await q.message.reply_text(UIManager.get_help_text(), parse_mode="Markdown")
+            elif d == "sys_force_redraw":
+                ok = await force_redraw()
+                await context.bot.send_message(
+                    chat,
+                    f"🔄 *Force Redraw*: {'✅ Executed' if ok else '❌ Failed'}",
+                    parse_mode="Markdown"
+                )
 
             elif d == "mass_start":
                 await context.bot.send_message(
@@ -761,11 +857,14 @@ class AegisBot:
             await app.initialize()
             await app.start()
 
-            # 5. Launch Watchdog (V7.0 Deep Daemon)
+            # 5. Launch Watchdog (V7.1 Active Supervisor)
             asyncio.create_task(watchdog_loop(app, self))
 
-            # 6. Launch Keep-Alive Daemon (V7.0 System Anchor)
+            # 6. Launch Keep-Alive Daemon (V7.1 System Anchor)
             asyncio.create_task(keepalive_daemon(self))
+
+            # 6.5 Launch Telemetry Daemon (V7.1 Active Supervisor)
+            asyncio.create_task(telemetry_daemon(self))
 
             # 7. Auto-resume
             asyncio.create_task(self._auto_resume())
