@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V8.2 Direct Kernel Thread Counting
+# main.py — Project Aegis V8.5 Remote Command Center & Kernel Sight
 import os
 import sys
 import enum
@@ -33,7 +33,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "8.2"
+VERSION = "8.5"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -53,7 +53,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV82")
+logger = logging.getLogger("AegisV85")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -101,6 +101,32 @@ def release_pid_lock():
             logger.info("⚓ ANCHOR: PID lock released")
     except Exception:
         pass
+
+def ensure_autoboot():
+    """
+    V8.5: Ensure bot auto-starts on Termux launch by checking ~/.bashrc.
+    If not present, append the launch command.
+    """
+    try:
+        bashrc_path = os.path.expanduser("~/.bashrc")
+        launch_cmd = f"cd {_bot_dir} && python main.py {DEVICE_ID} &"
+        
+        # Check if already in bashrc
+        if os.path.exists(bashrc_path):
+            with open(bashrc_path, 'r') as f:
+                content = f.read()
+            if launch_cmd in content:
+                logger.info("V8.5 AUTOBOOT: Launch command already in ~/.bashrc")
+                return
+        
+        # Append to bashrc
+        with open(bashrc_path, 'a') as f:
+            f.write(f"\n# Aegis V8.5 Auto-boot\n")
+            f.write(f"{launch_cmd}\n")
+        
+        logger.info(f"V8.5 AUTOBOOT: Added launch command to ~/.bashrc")
+    except Exception as e:
+        logger.warning(f"V8.5 AUTOBOOT: Failed to setup autoboot: {e}")
 
 # ── SIGNAL HANDLERS ───────────────────────────────────────────────────────
 def _signal_handler(signum, frame):
@@ -896,6 +922,111 @@ class AegisBot:
         except Exception as e:
             await update.message.reply_text(f"❌ Console error: {e}")
 
+    async def cmd_exec(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        V8.5 REMOTE CONSOLE: Execute shell command and return output.
+        Usage: /exec [command]
+        """
+        if not await self._is_admin(update.effective_user.id):
+            return
+        
+        # Get command args
+        args = context.args
+        if not args:
+            await update.message.reply_text(
+                "⚠️ Usage: `/exec [command]`\nExample: `/exec ps -A | grep roblox`",
+                parse_mode="Markdown"
+            )
+            return
+        
+        command = " ".join(args)
+        logger.info(f"🔧 V8.5 REMOTE EXEC: {command}")
+        
+        try:
+            # Execute command
+            ret, stdout, stderr = await run_bash(f"su -c '{command}'")
+            
+            # Build output
+            output = ""
+            if stdout:
+                output += f"📤 STDOUT:\n```\n{stdout}\n```\n"
+            if stderr:
+                output += f"⚠️ STDERR:\n```\n{stderr}\n```\n"
+            if not stdout and not stderr:
+                output = "_(no output)_"
+            
+            output += f"\n🔢 Exit code: `{ret}`"
+            
+            # Check length - if > 4000 chars, send as file
+            if len(output) > 4000:
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                    f.write(f"Command: {command}\n")
+                    f.write(f"Exit code: {ret}\n\n")
+                    f.write(f"STDOUT:\n{stdout}\n\n")
+                    f.write(f"STDERR:\n{stderr}\n")
+                    temp_path = f.name
+                
+                with open(temp_path, 'rb') as f:
+                    await update.message.reply_document(
+                        document=f,
+                        caption=f"🔧 Exec output (too long for message)\nCmd: `{command[:50]}...`",
+                        parse_mode="Markdown"
+                    )
+                os.remove(temp_path)
+            else:
+                await update.message.reply_text(output, parse_mode="Markdown")
+                
+        except Exception as e:
+            logger.error(f"V8.5 REMOTE EXEC error: {e}")
+            await update.message.reply_text(f"❌ Exec error: `{e}`", parse_mode="Markdown")
+
+    async def cmd_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        V8.5 ACTIVE GIT SYNC: Update code from git and hot-reload.
+        Usage: /update
+        """
+        if not await self._is_admin(update.effective_user.id):
+            return
+        
+        await update.message.reply_text("♻️ V8.5 GIT UPDATE: Fetching latest code...")
+        logger.info("V8.5 GIT UPDATE: Starting hot-reload sequence")
+        
+        try:
+            # Step 1: git fetch --all
+            ret1, out1, err1 = await run_bash(f"git -C {_bot_dir} fetch --all 2>&1")
+            if ret1 != 0:
+                await update.message.reply_text(
+                    f"❌ Git fetch failed:\n```\n{err1 or out1}\n```",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            # Step 2: git reset --hard origin/main
+            ret2, out2, err2 = await run_bash(f"git -C {_bot_dir} reset --hard origin/main 2>&1")
+            result = (out2 or err2 or "(no output)")[:2000]
+            
+            await update.message.reply_text(
+                f"✅ Git update complete:\n```\n{result}\n```\n"
+                f"🔄 Hot-reloading in 3 seconds...",
+                parse_mode="Markdown"
+            )
+            
+            logger.info("V8.5 HOT-RELOAD: Restarting process...")
+            
+            # Step 3: Hot-reload via os.execv
+            await asyncio.sleep(3)
+            
+            # Release PID lock before restart
+            release_pid_lock()
+            
+            # Restart with same arguments
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+            
+        except Exception as e:
+            logger.error(f"V8.5 GIT UPDATE error: {e}")
+            await update.message.reply_text(f"❌ Update error: `{e}`", parse_mode="Markdown")
+
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self._is_admin(update.effective_user.id): return
         t = update.message.text
@@ -1265,6 +1396,8 @@ class AegisBot:
             # 3. Handlers
             app.add_handler(CommandHandler("start",   self.cmd_start))
             app.add_handler(CommandHandler("console", self.cmd_console))
+            app.add_handler(CommandHandler("exec",    self.cmd_exec))
+            app.add_handler(CommandHandler("update",  self.cmd_update))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
             app.add_handler(CallbackQueryHandler(self.handle_callback))
             app.add_error_handler(self.error_handler)

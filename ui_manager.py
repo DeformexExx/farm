@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V8.2 Direct Kernel Thread Counting
+# ui_manager.py — Project Aegis V8.5 Remote Command Center & Kernel Sight
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V8.2*\n"
+            "💎 *AEGIS OVERLORD V8.5*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[🔬 KERNEL SCANNER]`\n"
+            f"⚡️ SYSTEM : `[🎯 REMOTE CONSOLE]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -41,18 +41,18 @@ class UIManager:
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
         return (
-            "💎 *AEGIS V8.2 — KERNEL SCANNER*\n"
+            "💎 *AEGIS V8.5 — REMOTE COMMAND CENTER*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
+            f"🎯 REMOTE : `[EXEC & UPDATE ENABLED]`\n"
             f"🔬 THREADS : `[DIRECT /proc ACCESS]`\n"
             f"👑 STATUS  : `[IMMORTAL - OOM PROTECTED]`\n"
-            f"👻 GHOST   : `[WATCHER ACTIVE]`\n"
-            f"🕐 RESTART : `[05:00 DAILY]`\n"
+            f"� AUTOBOOT: `[~/.bashrc CHECKED]`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "🔬 _Direct Kernel Thread Counting — No more guessing._"
+            "🎯 _Remote Exec, Hot-Reload, Kernel Sight._"
         )
 
     @staticmethod
@@ -83,7 +83,7 @@ class UIManager:
         state_map:  {clone_name: CloneState (str value)}
         uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *AEGIS OVERLORD V8.2 KERNEL SCANNER*\n"
+        msg = "💎 *AEGIS OVERLORD V8.5 REMOTE CONSOLE*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
@@ -167,14 +167,15 @@ class UIManager:
     @staticmethod
     def get_help_text() -> str:
         return (
-            "🔬 *AEGIS V8.2 DIRECT KERNEL THREAD COUNTING*\n\n"
+            "🎯 *AEGIS V8.5 REMOTE COMMAND CENTER & KERNEL SIGHT*\n\n"
+            "• Remote Console: `/exec [command]` — Shell access via Telegram\n"
+            "• Hot Reload: `/update` — Git pull & auto-restart\n"
+            "• Auto-Boot: `~/.bashrc` auto-configured on startup\n"
             "• Kernel Scanner: *Direct /proc/[PID]/status* reading\n"
             "• Fallback: */proc/[PID]/task* directory counting\n"
             "• Freeze Detection: *Threads < 50 for 5min* triggers restart\n"
-            "• /proc Missing: *60s* of no access marks CRASHED\n"
-            "• Thread Display: *Real numbers* — no more [SCANNING...]\n"
             "• OOM Protection: *-1000 score* (IMMORTAL)\n"
             "• Ghost Watch: *External monitor* auto-restarts bot\n"
             "• Daily Restart: *05:00* sequential maintenance\n\n"
-            "_V8.2: We don't guess thread counts. We know them._"
+            "_V8.5: Full remote control. No Termux required._"
         )
