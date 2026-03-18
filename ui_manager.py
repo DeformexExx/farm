@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V8.0 Hard-Core System Critical
+# ui_manager.py — Project Aegis V8.2 Direct Kernel Thread Counting
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V8.0*\n"
+            "💎 *AEGIS OVERLORD V8.2*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[☠️ SYSTEM CRITICAL]`\n"
+            f"⚡️ SYSTEM : `[🔬 KERNEL SCANNER]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -41,18 +41,18 @@ class UIManager:
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
         return (
-            "💎 *AEGIS V8.0 — SYSTEM CRITICAL*\n"
+            "💎 *AEGIS V8.2 — KERNEL SCANNER*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
-            f"� STATUS  : `[IMMORTAL - OOM PROTECTED]`\n"
+            f"🔬 THREADS : `[DIRECT /proc ACCESS]`\n"
+            f"👑 STATUS  : `[IMMORTAL - OOM PROTECTED]`\n"
             f"👻 GHOST   : `[WATCHER ACTIVE]`\n"
             f"🕐 RESTART : `[05:00 DAILY]`\n"
-            f"⏱️ PAUSE   : `[30s SMART PAUSE]`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "☠️ _Android can't kill me. I am the system now._"
+            "🔬 _Direct Kernel Thread Counting — No more guessing._"
         )
 
     @staticmethod
@@ -83,7 +83,7 @@ class UIManager:
         state_map:  {clone_name: CloneState (str value)}
         uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *AEGIS OVERLORD V8.0 SYSTEM CRITICAL*\n"
+        msg = "💎 *AEGIS OVERLORD V8.2 KERNEL SCANNER*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
@@ -167,14 +167,14 @@ class UIManager:
     @staticmethod
     def get_help_text() -> str:
         return (
-            "� *AEGIS V8.0 HARD-CORE SYSTEM CRITICAL*\n\n"
-            "• OOM Protection: *-1000 score* (IMMORTAL to Android)\n"
-            "• Ghost Watch: *External monitor* auto-restarts bot if killed\n"
-            "• Interface Isolation: *Pure Shell Mode* when SystemUI crashes\n"
-            "• Emergency RAM: *STOP/CONT* clones when <100MB free\n"
-            "• PID Recovery: *Re-adopts* existing clones after crash\n"
-            "• Daily Restart: *05:00* sequential maintenance\n"
-            "• Smart Pause: *30s* watchdog immunity on stop\n"
-            "• Watchdog: *x10 tolerance* freeze detection\n\n"
-            "_V8.0: Android can't kill me. I am the system now._"
+            "🔬 *AEGIS V8.2 DIRECT KERNEL THREAD COUNTING*\n\n"
+            "• Kernel Scanner: *Direct /proc/[PID]/status* reading\n"
+            "• Fallback: */proc/[PID]/task* directory counting\n"
+            "• Freeze Detection: *Threads < 50 for 5min* triggers restart\n"
+            "• /proc Missing: *60s* of no access marks CRASHED\n"
+            "• Thread Display: *Real numbers* — no more [SCANNING...]\n"
+            "• OOM Protection: *-1000 score* (IMMORTAL)\n"
+            "• Ghost Watch: *External monitor* auto-restarts bot\n"
+            "• Daily Restart: *05:00* sequential maintenance\n\n"
+            "_V8.2: We don't guess thread counts. We know them._"
         )

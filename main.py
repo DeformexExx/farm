@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V7.4 Scheduled Maintenance
+# main.py — Project Aegis V8.2 Direct Kernel Thread Counting
 import os
 import sys
 import enum
@@ -33,7 +33,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "7.4"
+VERSION = "8.2"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -53,7 +53,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV74")
+logger = logging.getLogger("AegisV82")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -122,38 +122,250 @@ except Exception as e:
 # ── SYSTEM PRIORITY & OOM ─────────────────────────────────────────────────
 async def anchor_to_system():
     """
-    V7.0: Make bot the LAST thing the system kills.
-    - Set OOM score to -1000 (unkillable)
-    - Increase CPU priority
+    V8.0 GOD MODE: System-Critical Service Level.
+    - Set OOM score to -1000 (unkillable even if system exploding)
+    - Elevate CPU priority to maximum
+    - Apply same protection to child ADB/subprocesses
     """
     pid = os.getpid()
     
-    # OOM Score Adjustment (-1000 = never kill)
+    # V8.0 GOD MODE: OOM Score Adjustment (-1000 = absolutely never kill)
     oom_path = f"/proc/{pid}/oom_score_adj"
     try:
         ret, _, _ = await run_bash(f"su -c 'echo -1000 > {oom_path}'")
         if ret == 0:
-            logger.info("⚓ ANCHOR: OOM score set to -1000 (unkillable)")
+            logger.info("👑 V8.0 GOD MODE: OOM score set to -1000 (IMMORTAL)")
         else:
-            logger.warning("⚓ ANCHOR: Failed to set OOM score (requires root)")
+            logger.warning("👑 V8.0 GOD MODE: Failed to set OOM score (requires root)")
     except Exception as e:
-        logger.warning(f"⚓ ANCHOR: OOM adjustment error: {e}")
+        logger.warning(f"👑 V8.0 GOD MODE: OOM adjustment error: {e}")
     
-    # CPU Priority (renice -15 = high priority)
+    # V8.0: Maximum CPU Priority (renice -20 = real-time priority)
     try:
-        ret, _, _ = await run_bash(f"su -c 'renice -n -15 -p {pid}'")
+        ret, _, _ = await run_bash(f"su -c 'renice -n -20 -p {pid}'")
         if ret == 0:
-            logger.info("⚓ ANCHOR: CPU priority elevated (renice -15)")
+            logger.info("👑 V8.0 GOD MODE: CPU priority at MAXIMUM (renice -20)")
+        else:
+            # Fallback to -15 if -20 fails
+            await run_bash(f"su -c 'renice -n -15 -p {pid}'")
+            logger.info("👑 V8.0 GOD MODE: CPU priority at HIGH (renice -15)")
     except Exception as e:
-        logger.warning(f"⚓ ANCHOR: renice error: {e}")
+        logger.warning(f"👑 V8.0 GOD MODE: renice error: {e}")
     
-    # Taskset (if available) - bind to CPU 0 for consistency
+    # V8.0: CPU Isolation (dedicate core 0 to bot)
     try:
-        ret, _, _ = await run_bash(f"su -c 'taskset -p 01 {pid}' 2>/dev/null")
+        ret, _, _ = await run_bash(f"su -c 'taskset -cp 0 {pid}' 2>/dev/null")
         if ret == 0:
-            logger.info("⚓ ANCHOR: CPU affinity set (taskset)")
+            logger.info("👑 V8.0 GOD MODE: CPU isolation on core 0")
     except Exception:
-        pass  # taskset may not be available
+        pass
+    
+    # V8.0: Protect all existing child processes
+    await protect_child_processes()
+    
+    # V8.0: Set I/O priority to real-time
+    try:
+        await run_bash(f"su -c 'ionice -c 1 -n 0 -p {pid}' 2>/dev/null")
+        logger.info("👑 V8.0 GOD MODE: I/O priority set to REAL-TIME")
+    except Exception:
+        pass
+
+async def protect_child_processes():
+    """
+    V8.0: Apply OOM protection to all child ADB and monitoring processes.
+    """
+    try:
+        # Find all child processes of the bot
+        ret, stdout, _ = await run_bash(f"su -c 'pgrep -P {os.getpid()} 2>/dev/null || echo NONE'")
+        if ret == 0 and stdout.strip() and stdout.strip() != "NONE":
+            child_pids = stdout.strip().split('\n')
+            for child_pid in child_pids:
+                if child_pid.strip():
+                    # Apply -1000 OOM score to each child
+                    await run_bash(f"su -c 'echo -1000 > /proc/{child_pid.strip()}/oom_score_adj 2>/dev/null'")
+            logger.info(f"👑 V8.0 GOD MODE: Applied OOM protection to {len(child_pids)} child processes")
+    except Exception as e:
+        logger.debug(f"👑 V8.0 GOD MODE: Child protection skipped: {e}")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# V8.0 EMERGENCY RAM RECOVERY — STOP/CONT Protocol
+# ═══════════════════════════════════════════════════════════════════════════
+_emergency_stopped: Dict[str, float] = {}  # Track clones in STOP state
+
+async def emergency_ram_recovery(bot_instance: "AegisBot"):
+    """
+    V8.0 HARD-CORE: When RAM < 100MB, stop being polite.
+    Uses kill -STOP to freeze least important clone entirely.
+    """
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        available_mb = mem.available // (1024 * 1024)
+        
+        if available_mb < 100:  # Less than 100MB available
+            logger.critical(f"🚨 V8.0 EMERGENCY: RAM critically low ({available_mb}MB available)")
+            
+            # Find the least important running clone (oldest uptime)
+            victim = None
+            oldest_time = float('inf')
+            
+            for name, state in bot_instance.clone_states.items():
+                if state == CloneState.RUNNING:
+                    start_time = bot_instance.running_since.get(name, time.time())
+                    if start_time < oldest_time:
+                        oldest_time = start_time
+                        victim = name
+            
+            if victim:
+                pid = await InjectionEngine.get_clone_pid(victim)
+                if pid:
+                    # STOP the clone - freeze its RAM usage entirely
+                    await run_bash(f"su -c 'kill -STOP {pid}'")
+                    _emergency_stopped[victim] = time.time()
+                    logger.critical(f"🚨 V8.0 EMERGENCY: STOPPED {victim} (PID {pid}) to freeze RAM")
+                    
+                    # Notify admin
+                    admin_id = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
+                    if admin_id and bot_instance.application:
+                        try:
+                            await bot_instance.application.bot.send_message(
+                                admin_id,
+                                f"🚨 *EMERGENCY RAM RECOVERY*\n`{victim}` STOPPED (frozen)\nAvailable: {available_mb}MB",
+                                parse_mode="Markdown"
+                            )
+                        except Exception:
+                            pass
+                    
+                    # Schedule resume after 30 seconds
+                    asyncio.create_task(_resume_clone_after_emergency(bot_instance, victim, pid))
+                    
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.error(f"🚨 V8.0 EMERGENCY: Recovery error: {e}")
+
+async def _resume_clone_after_emergency(bot_instance: "AegisBot", name: str, pid: str):
+    """
+    Resume a clone after 30 second emergency freeze.
+    """
+    await asyncio.sleep(30)
+    
+    # Check if still in emergency stopped state
+    if name in _emergency_stopped:
+        del _emergency_stopped[name]
+        
+        # Try to resume
+        try:
+            await run_bash(f"su -c 'kill -CONT {pid}'")
+            logger.info(f"🚨 V8.0 EMERGENCY: RESUMED {name} (PID {pid})")
+        except Exception as e:
+            logger.error(f"🚨 V8.0 EMERGENCY: Failed to resume {name}: {e}")
+            # If resume fails, mark as stopped
+            bot_instance.set_state(name, CloneState.STOPPED)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# V8.0 INTERFACE ISOLATION — Pure Shell Mode
+# ═══════════════════════════════════════════════════════════════════════════
+_system_ui_crashed = False
+
+async def check_system_ui_health() -> bool:
+    """
+    V8.0: Check if SystemUI is responsive.
+    Returns True if healthy, False if crashed.
+    """
+    try:
+        # Check if system_server is running
+        ret, stdout, _ = await run_bash("su -c 'service list | grep system_server'")
+        if ret != 0 or not stdout.strip():
+            return False
+        
+        # Additional check: can we get window info
+        ret2, _, _ = await run_bash("su -c 'dumpsys window | head -5' 2>/dev/null")
+        if ret2 != 0:
+            return False
+            
+        return True
+    except Exception:
+        return False
+
+async def enter_pure_shell_mode(bot_instance: "AegisBot"):
+    """
+    V8.0: Switch to Pure Shell Mode when SystemUI crashes.
+    Continue managing clones via direct am commands, ignoring frozen screen.
+    """
+    global _system_ui_crashed
+    
+    if _system_ui_crashed:
+        return  # Already in shell mode
+    
+    _system_ui_crashed = True
+    logger.critical("👁️ V8.0 INTERFACE ISOLATION: SystemUI CRASHED — Entering Pure Shell Mode")
+    
+    # Notify admin
+    admin_id = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
+    if admin_id and bot_instance.application:
+        try:
+            await bot_instance.application.bot.send_message(
+                admin_id,
+                "👁️ *INTERFACE ISOLATION*\nSystemUI crashed.\nSwitched to Pure Shell Mode.\nRoblox clones continue running headless.",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+
+async def exit_pure_shell_mode(bot_instance: "AegisBot"):
+    """
+    V8.0: Exit Pure Shell Mode when SystemUI recovers.
+    """
+    global _system_ui_crashed
+    
+    if not _system_ui_crashed:
+        return  # Already in normal mode
+    
+    _system_ui_crashed = False
+    logger.info("👁️ V8.0 INTERFACE ISOLATION: SystemUI RECOVERED — Exiting Pure Shell Mode")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# V8.0 PID-LOCK RECOVERY — Re-adoption Protocol
+# ═══════════════════════════════════════════════════════════════════════════
+async def scan_and_adopt_clones(bot_instance: "AegisBot"):
+    """
+    V8.0: After crash recovery, re-adopt existing Roblox windows instead of launching new ones.
+    """
+    logger.info("🔍 V8.0 PID-LOCK RECOVERY: Scanning for existing clones to adopt...")
+    
+    adopted = 0
+    for c in bot_instance.config.clones_data:
+        name = c.get("name")
+        if not name:
+            continue
+        
+        # Check if clone is already running
+        pid = await InjectionEngine.get_clone_pid(name)
+        if pid:
+            # Verify it's actually a Roblox process
+            ret, cmdline, _ = await run_bash(f"su -c 'cat /proc/{pid}/cmdline 2>/dev/null || echo UNKNOWN'")
+            if ret == 0 and f"com.roblox.{name}" in cmdline:
+                # Adopt this clone
+                bot_instance.set_state(name, CloneState.RUNNING)
+                adopted += 1
+                logger.info(f"🔍 V8.0 PID-LOCK RECOVERY: Adopted {name} (PID {pid})")
+    
+    if adopted > 0:
+        logger.info(f"🔍 V8.0 PID-LOCK RECOVERY: Adopted {adopted} existing clones")
+        # Notify admin
+        admin_id = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
+        if admin_id and bot_instance.application:
+            try:
+                await bot_instance.application.bot.send_message(
+                    admin_id,
+                    f"🔍 *PID-LOCK RECOVERY*\nAdopted {adopted} existing clones after restart",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+    else:
+        logger.info("🔍 V8.0 PID-LOCK RECOVERY: No existing clones found to adopt")
 
 # ── SURGICAL TRIM ─────────────────────────────────────────────────────────
 async def surgical_trim(bot_instance: "AegisBot"):
@@ -241,18 +453,18 @@ class LogStreamer:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TELEMETRY DAEMON — V7.1 Active Supervisor (15s interval)
+# TELEMETRY DAEMON — V8.2 Direct Kernel Thread Counting (10s interval)
 # ═══════════════════════════════════════════════════════════════════════════
 async def telemetry_daemon(bot_instance: "AegisBot"):
     """
-    V7.1: Collects thread and CPU telemetry every 15 seconds for freeze detection.
-    This runs independently to ensure data is always fresh for the watchdog.
+    V8.2: Direct Kernel Thread Counting every 10 seconds.
+    Uses /proc/[PID]/status for real-time thread telemetry.
     """
-    logger.info("📊 TELEMETRY: Daemon started (V7.1 - 15s interval)")
+    logger.info("📊 V8.2 TELEMETRY: Kernel Scanner started (10s interval)")
     cycle = 0
     
     while True:
-        await asyncio.sleep(15)  # 15 second interval
+        await asyncio.sleep(10)  # 10 second interval
         cycle += 1
         
         try:
@@ -260,8 +472,8 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
                 if state == CloneState.RUNNING:
                     pid = await InjectionEngine.get_clone_pid(name)
                     if pid:
-                        # Collect thread count (with fallback)
-                        thread_count, source = await MonitorEngine.get_thread_count_fallback(name, pid)
+                        # V8.2: Collect thread count via kernel scanner
+                        thread_count, source = await MonitorEngine.get_thread_count_kernel(pid)
                         MonitorEngine.record_thread_history(name, thread_count)
                         
                         # Collect CPU usage
@@ -269,16 +481,16 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
                         if cpu >= 0:
                             MonitorEngine.record_cpu_history(name, cpu)
                         
-                        # Log every 4 cycles (1 minute)
-                        if cycle % 4 == 0:
-                            logger.debug(f"📊 [{name}] Threads: {thread_count} ({source}), CPU: {cpu:.1f}%")
+                        # Log every 6 cycles (1 minute)
+                        if cycle % 6 == 0:
+                            logger.debug(f"📊 V8.2 [{name}] Threads: {thread_count} ({source}), CPU: {cpu:.1f}%")
                     else:
                         # PID lost but state is RUNNING - mark STOPPED
-                        logger.warning(f"📊 [{name}] PID lost during telemetry, marking STOPPED")
+                        logger.warning(f"📊 V8.2 [{name}] PID lost during telemetry, marking STOPPED")
                         bot_instance.set_state(name, CloneState.STOPPED)
                         
         except Exception as e:
-            logger.error(f"📊 TELEMETRY error: {e}")
+            logger.error(f"📊 V8.2 TELEMETRY error: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -308,18 +520,34 @@ async def force_redraw() -> bool:
         return False
 async def keepalive_daemon(bot_instance: "AegisBot"):
     """
-    V7.1: Enhanced Daemon with UI-Crash Immunity and Telemetry.
-    Uses dumpsys for verification, ADB shell for headless interaction.
-    Continues even if SystemUI crashes.
+    V8.0 HARD-CORE: System-Critical Keep-Alive with Interface Isolation.
+    Detects SystemUI crashes and switches to Pure Shell Mode.
+    Triggers emergency RAM recovery when needed.
     """
-    logger.info("⚓ ANCHOR: Keep-Alive Daemon started (V7.1)")
+    global _system_ui_crashed
+    
+    logger.info("👑 V8.0 GOD MODE: Keep-Alive Daemon started")
     heartbeat_count = 0
+    ui_check_counter = 0
     
     while True:
         await asyncio.sleep(30)  # Check every 30 seconds
         heartbeat_count += 1
+        ui_check_counter += 1
         
         try:
+            # V8.0: SystemUI Health Check every 60 seconds
+            if ui_check_counter >= 2:
+                ui_check_counter = 0
+                ui_healthy = await check_system_ui_health()
+                
+                if not ui_healthy and not _system_ui_crashed:
+                    # SystemUI crashed - enter Pure Shell Mode
+                    await enter_pure_shell_mode(bot_instance)
+                elif ui_healthy and _system_ui_crashed:
+                    # SystemUI recovered - exit Pure Shell Mode
+                    await exit_pure_shell_mode(bot_instance)
+            
             # 1. Headless heartbeat - input tap with device ID (bypasses UI)
             await run_bash("su -c 'input -d 0 tap 540 960' 2>/dev/null || su -c 'input tap 540 960' 2>/dev/null || true")
             
@@ -327,15 +555,18 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
             ret, stdout, _ = await run_bash("su -c 'dumpsys activity activities | grep -E \"mFocused|mResumed\"' 2>/dev/null || echo NONE")
             system_responsive = ret == 0 and stdout.strip() != "NONE"
             
-            # 3. Periodic logging
-            if heartbeat_count % 10 == 0:  # Every 5 minutes
-                logger.info(f"⚓ ANCHOR: Keep-Alive heartbeat #{heartbeat_count} (System responsive: {system_responsive})")
+            # 3. V8.0: Memory pressure check — EMERGENCY PROTOCOL
+            await emergency_ram_recovery(bot_instance)
             
-            # 4. Memory pressure check & surgical trim
+            # 4. Memory pressure check & surgical trim (fallback)
             if heartbeat_count % 6 == 0:  # Every 3 minutes
                 await surgical_trim(bot_instance)
             
-            # 5. PID validation for all clones
+            # 5. V8.0: Protect child processes periodically
+            if heartbeat_count % 10 == 0:  # Every 5 minutes
+                await protect_child_processes()
+            
+            # 6. PID validation for all clones
             for name, state in list(bot_instance.clone_states.items()):
                 if state == CloneState.RUNNING:
                     # Use dumpsys for verification (works even if UI crashed)
@@ -343,11 +574,16 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
                     if not verified:
                         pid = await InjectionEngine.get_clone_pid(name)
                         if not pid:
-                            logger.warning(f"⚓ ANCHOR: [{name}] Lost via dumpsys & pidof, marking STOPPED")
+                            logger.warning(f"👑 V8.0: [{name}] Lost via dumpsys & pidof, marking STOPPED")
                             bot_instance.set_state(name, CloneState.STOPPED)
+            
+            # 7. Periodic logging
+            if heartbeat_count % 10 == 0:  # Every 5 minutes
+                mode_str = "SHELL-MODE" if _system_ui_crashed else "NORMAL"
+                logger.info(f"👑 V8.0 Keep-Alive #{heartbeat_count} [Mode: {mode_str}]")
                         
         except Exception as e:
-            logger.error(f"⚓ ANCHOR: Keep-Alive error: {e}")
+            logger.error(f"👑 V8.0 Keep-Alive error: {e}")
             await asyncio.sleep(5)
 
 
@@ -447,14 +683,13 @@ async def daily_restart_daemon(bot_instance: "AegisBot"):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# WATCHDOG — V7.2 Final Sensor Calibration
+# WATCHDOG — V8.2 Direct Kernel Thread Counting
 # ═══════════════════════════════════════════════════════════════════════════
 async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     """
-    V7.2: Final Sensor Calibration — Reduced false positives with x10 tolerance.
-    Features: 600s immunity window, enhanced log parsing, [SCANNING...] status.
+    V8.2: Direct Kernel Thread Counting — Reliable freeze detection.
+    Features: Threads < 50 for 5min triggers restart, /proc disappearance detection.
     CRITICAL RULE: Watchdog is LEGALLY BLIND to any clone not in RUNNING state.
-    Uses dumpsys as backup verification when /proc is unavailable.
     """
     import re
 
@@ -465,14 +700,14 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     # SILENT START: Skip everything for first 10 minutes
     boot_time = time.time()
     
-    logger.info("⚓ ANCHOR: Watchdog initialized (V7.1 Active Supervisor)")
+    logger.info("🔬 V8.2 WATCHDOG: Direct Kernel Thread Counting initialized")
     
     while True:
         await asyncio.sleep(60)
         
         # ══ 10-MINUTE TOTAL SILENCE ════════════════════════════════════
         if time.time() - boot_time < 600:
-            logger.info(f"⚓ ANCHOR: Watchdog Silent Mode ({int(600 - (time.time() - boot_time))}s remaining)")
+            logger.info(f"🔬 V8.2: Silent Mode ({int(600 - (time.time() - boot_time))}s remaining)")
             continue
         try:
             now = time.time()
@@ -513,27 +748,27 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                         # Clone is actually running, /proc just unavailable
                         continue
                 
-                # V7.2 AGGRESSIVE FREEZE DETECTION — Calibrated (x10 tolerance)
+                # V8.2 KERNEL-BASED FREEZE DETECTION — Threads < 50 for 5 minutes
                 needs_action = False
                 reason       = ""
                 
-                # Check thread-based freeze (0 threads or unchanged for 180s)
-                if MonitorEngine.is_thread_frozen(name):
+                # Check thread-based freeze (Threads < 50 for 5 minutes)
+                if MonitorEngine.is_thread_frozen(name, threshold=50):
                     freeze_strikes[name] = freeze_strikes.get(name, 0) + 1
-                    if freeze_strikes[name] >= 10:  # V7.2: Changed from 2 to 10 (x10 tolerance)
-                        reason = f"FROZEN (Thread stall ×{freeze_strikes[name]})"
+                    if freeze_strikes[name] >= 3:  # V8.2: 3 strikes before action
+                        reason = f"FROZEN (Threads<50 for 5min ×{freeze_strikes[name]})"
                         needs_action = True
                     else:
-                        logger.warning(f"🧊 [{name}] Freeze strike {freeze_strikes[name]}/10 (thread stall)")
+                        logger.warning(f"🧊 V8.2 [{name}] Freeze strike {freeze_strikes[name]}/3 (Threads<50)")
                 
                 # Check CPU-based freeze (<1% for 120s)
                 elif MonitorEngine.is_cpu_frozen(name):
                     freeze_strikes[name] = freeze_strikes.get(name, 0) + 1
-                    if freeze_strikes[name] >= 10:  # V7.2: Changed from 2 to 10
+                    if freeze_strikes[name] >= 3:  # V8.2: 3 strikes before action
                         reason = f"FROZEN (CPU stall ×{freeze_strikes[name]})"
                         needs_action = True
                     else:
-                        logger.warning(f"🧊 [{name}] Freeze strike {freeze_strikes[name]}/10 (CPU stall)")
+                        logger.warning(f"🧊 V8.2 [{name}] Freeze strike {freeze_strikes[name]}/3 (CPU stall)")
                 else:
                     freeze_strikes[name] = 0  # Reset on healthy readings
 
@@ -1017,10 +1252,13 @@ class AegisBot:
         
         try:
             # 1. ANCHOR TO SYSTEM
-            logger.info(f"⚓ PROJECT AEGIS V7.4 SCHEDULED MAINTENANCE — {DEVICE_ID}")
+            logger.info(f"� PROJECT AEGIS V8.2 DIRECT KERNEL THREAD COUNTING — {DEVICE_ID}")
             await anchor_to_system()
             
-            # 2. Build application
+            # 2. V8.0: Scan and adopt existing clones before starting new ones
+            await scan_and_adopt_clones(self)
+
+            # 3. Build application
             self.application = ApplicationBuilder().token(self.config.bot_token).build()
             app = self.application
 
@@ -1035,10 +1273,10 @@ class AegisBot:
             await app.initialize()
             await app.start()
 
-            # 5. Launch Watchdog (V7.3 Smart Pause)
+            # 6. Launch Watchdog (V8.0 Hard-Core)
             asyncio.create_task(watchdog_loop(app, self))
 
-            # 6. Launch Keep-Alive Daemon (V7.1 System Anchor)
+            # 6.1 Launch Keep-Alive Daemon (V8.0 System Critical)
             asyncio.create_task(keepalive_daemon(self))
 
             # 6.5 Launch Telemetry Daemon (V7.1 Active Supervisor)
@@ -1050,7 +1288,7 @@ class AegisBot:
             # 7. Auto-resume
             asyncio.create_task(self._auto_resume())
 
-            logger.info(f"⚓ PROJECT AEGIS V7.4 ANCHORED — {DEVICE_ID}")
+            logger.info(f"� PROJECT AEGIS V8.2 KERNEL SCANNER ACTIVE — {DEVICE_ID}")
 
             # 8. Poll
             await app.updater.start_polling(drop_pending_updates=True)

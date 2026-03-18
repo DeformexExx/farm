@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-# monitor.py — Project Aegis V7.1 Active Supervisor Tuning
+# monitor.py — Project Aegis V8.2 Direct Kernel Thread Counting
 import os
+import re
 import logging
 import time
 from typing import Optional, Dict, Tuple
@@ -9,6 +10,51 @@ from bash_utils import run_bash
 logger = logging.getLogger("MonitorEngine")
 
 class MonitorEngine:
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # V8.2 KERNEL SCANNER — Direct /proc access for reliable thread counting
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    @staticmethod
+    async def get_thread_count_kernel(pid: str) -> Tuple[int, str]:
+        """
+        V8.2 PRIMARY: Read thread count directly from /proc/[PID]/status.
+        Returns (thread_count, source) where source is 'kernel', 'task', or 'none'.
+        """
+        if not pid:
+            return -1, "none"
+        
+        # PRIMARY: Read /proc/[PID]/status
+        try:
+            ret, stdout, _ = await run_bash(f"su -c 'cat /proc/{pid}/status 2>/dev/null'")
+            if ret == 0 and stdout:
+                for line in stdout.split('\n'):
+                    if line.startswith('Threads:'):
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            try:
+                                count = int(parts[1])
+                                return count, "kernel"
+                            except ValueError:
+                                pass
+        except Exception as e:
+            logger.debug(f"V8.2: Kernel status read failed for PID {pid}: {e}")
+        
+        # FALLBACK: Count entries in /proc/[PID]/task/
+        try:
+            ret, stdout, _ = await run_bash(f"su -c 'ls /proc/{pid}/task/ 2>/dev/null | wc -l'")
+            if ret == 0 and stdout.strip():
+                try:
+                    count = int(stdout.strip())
+                    if count > 0:
+                        return count, "task"
+                except ValueError:
+                    pass
+        except Exception as e:
+            logger.debug(f"V8.2: Task directory fallback failed for PID {pid}: {e}")
+        
+        # Return -1 to indicate unable to read (not 0 which means dead)
+        return -1, "none"
     
     # ═══════════════════════════════════════════════════════════════════════
     # V7.1 THREAD TELEMETRY HISTORY — Tracks thread counts for freeze detection
@@ -30,49 +76,54 @@ class MonitorEngine:
     @staticmethod
     async def get_thread_count_fallback(clone_name: str, pid: str) -> Tuple[int, str]:
         """
-        V7.1: Fallback telemetry when /proc fails.
-        Reads last 20 lines of clone's log file to extract thread count.
-        Returns (thread_count, source) where source is 'proc', 'log', or 'none'.
+        V8.2: Direct Kernel Access for thread counting.
+        Primary: /proc/[PID]/status parsing.
+        Fallback: /proc/[PID]/task/ directory counting.
+        Returns (thread_count, source) where source is 'kernel', 'task', or 'none'.
         """
-        # First try /proc/{pid}/status
-        if pid:
-            ret, stdout, _ = await run_bash(f"su -c 'cat /proc/{pid}/status | grep -E \"Threads:\"'")
-            if ret == 0:
-                for line in stdout.split('\n'):
-                    if line.strip().startswith('Threads:'):
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            try:
-                                return int(parts[1]), "proc"
-                            except ValueError:
-                                pass
+        # V8.2: Use kernel scanner as primary method
+        return await MonitorEngine.get_thread_count_kernel(pid)
+    
+    @staticmethod
+    def _parse_thread_count_from_log(log_content: str) -> int:
+        """
+        V7.2: Flexible thread count parser with multiple regex patterns.
+        Returns thread count or 0 if not found.
+        """
+        if not log_content:
+            return 0
+            
+        # Comprehensive pattern list for different log formats
+        patterns = [
+            # Standard patterns
+            r'Threads?:\s*(\d+)',
+            r'thread[_\-]?count[=:]\s*(\d+)',
+            r'active[_\-]?threads?:\s*(\d+)',
+            r'\[THREADS?\]:?\s*(\d+)',
+            # Additional flexible patterns
+            r'threads?\s*[=:]\s*(\d+)',
+            r'threads?:?\s*(\d+)\s*(?:threads?|count)',
+            r'(?i)thread count[:\s]+(\d+)',
+            r'(?i)active threads?[:\s]+(\d+)',
+            r'\b(\d+)\s*threads?\b',
+        ]
         
-        # Fallback: Read from clone's log file
-        log_path = MonitorEngine._get_clone_log_path(clone_name)
-        try:
-            ret, stdout, _ = await run_bash(f"su -c 'tail -n 20 {log_path} 2>/dev/null || echo NONE'")
-            if ret == 0 and stdout.strip() != "NONE":
-                # Look for thread count patterns in log
-                # Common patterns: "Threads: 123", "thread_count=123", "active_threads: 123"
-                import re
-                patterns = [
-                    r'Threads?:\s*(\d+)',
-                    r'thread[_\-]?count[=:]\s*(\d+)',
-                    r'active[_\-]?threads?:\s*(\d+)',
-                    r'\[THREADS?\]:?\s*(\d+)',
-                ]
-                for line in stdout.split('\n'):
-                    for pattern in patterns:
-                        match = re.search(pattern, line, re.IGNORECASE)
-                        if match:
-                            try:
-                                return int(match.group(1)), "log"
-                            except ValueError:
-                                continue
-        except Exception as e:
-            logger.debug(f"V7.1: Log fallback failed for {clone_name}: {e}")
-        
-        return 0, "none"
+        lines = log_content.split('\n')
+        # Search in reverse order (newest first)
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            for pattern in patterns:
+                match = re.search(pattern, line, re.IGNORECASE)
+                if match:
+                    try:
+                        count = int(match.group(1))
+                        if count >= 0:  # Accept 0 as valid reading
+                            return count
+                    except (ValueError, IndexError):
+                        continue
+        return 0
     
     @staticmethod
     async def get_clone_cpu_usage(clone_name: str, pid: str) -> float:
@@ -140,34 +191,47 @@ class MonitorEngine:
         ]
     
     @staticmethod
-    def is_thread_frozen(clone_name: str) -> bool:
+    def is_thread_frozen(clone_name: str, threshold: int = 50) -> bool:
         """
-        V7.1 AGGRESSIVE FREEZE DETECTION:
-        Returns True if thread count is 0 or hasn't changed for 180 seconds.
+        V8.2: Thread freeze detection with configurable threshold.
+        Returns True if thread count < threshold for more than 5 minutes.
+        Also returns True if /proc entry disappears (process died).
         """
         history = MonitorEngine._thread_history.get(clone_name, [])
         if not history:
             return False
         
+        # Check if /proc entry is gone (last reading was -1 and still no data)
         latest_count = history[-1][1]
-        if latest_count == 0:
-            return True  # Zero threads = definitely frozen
-        
-        if len(history) < 3:
-            return False  # Not enough data
-        
-        # Check if count has been constant for 180 seconds
         now = time.time()
-        first_same = None
-        current_count = history[-1][1]
         
-        for ts, count in reversed(history):
-            if count != current_count:
-                break
-            first_same = ts
-        
-        if first_same and (now - first_same) >= 180:
-            return True
+        # V8.2: -1 means unable to read /proc - check if this persists
+        if latest_count < 0:
+            # Find when we first lost /proc access
+            first_negative = None
+            for ts, count in reversed(history):
+                if count >= 0:
+                    break
+                first_negative = ts
+            
+            # If /proc has been inaccessible for 60s, consider it crashed
+            if first_negative and (now - first_negative) >= 60:
+                return True
+            return False
+            
+        # V8.2: Check if thread count is below threshold
+        if latest_count > 0 and latest_count < threshold:
+            # Check if it has been low for 5 minutes (300 seconds)
+            first_low = None
+            for ts, count in reversed(history):
+                if count < 0:  # Skip unknown readings
+                    continue
+                if count >= threshold:
+                    break
+                first_low = ts
+            
+            if first_low and (now - first_low) >= 300:
+                return True
         
         return False
     
@@ -265,17 +329,16 @@ class MonitorEngine:
     @staticmethod
     async def get_clone_status(clone_name: str) -> str:
         """
-        V7.1: Проверяет запущен ли клон. Если да - возвращает статистику памяти и потоков.
-        Если нет - возвращает 'Offline'.
-        Использует fallback telemetry когда /proc недоступен.
+        V8.2: Direct Kernel Thread Counting — returns real thread count from /proc.
+        Uses kernel scanner for reliable numbers, no more [SCANNING...].
         """
         ret, stdout_pid, _ = await run_bash(f"su -c 'pidof com.roblox.{clone_name}'")
         pid = stdout_pid.strip()
         
         if ret == 0 and pid:
             try:
-                # V7.1: Use fallback telemetry for thread count
-                thread_count, source = await MonitorEngine.get_thread_count_fallback(clone_name, pid)
+                # V8.2: Use kernel scanner for thread count
+                thread_count, source = await MonitorEngine.get_thread_count_kernel(pid)
                 
                 # Record for freeze detection
                 MonitorEngine.record_thread_history(clone_name, thread_count)
@@ -297,7 +360,12 @@ class MonitorEngine:
                 if cpu >= 0:
                     MonitorEngine.record_cpu_history(clone_name, cpu)
                 
-                threads_str = str(thread_count) if thread_count > 0 else "?"
+                # V8.2: Show real thread count, never show [SCANNING...]
+                if thread_count < 0:
+                    threads_str = "N/A"  # Kernel read failed
+                else:
+                    threads_str = str(thread_count)
+                    
                 return f"Mem: {mem} | Thr: {threads_str} | Src: {source}"
             except Exception as e:
                 logger.error(f"Error fetching stats for {clone_name}: {e}")
