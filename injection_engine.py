@@ -246,7 +246,7 @@ class InjectionEngine:
 # ═══════════════════════════════════════════════════════════════════════════
 # V7.0 ASYNC LOCK WRAPPER for inject_and_launch
 # ═══════════════════════════════════════════════════════════════════════════
-_original_inject = InjectionEngine.inject_and_launch.__func__
+_original_inject = InjectionEngine.inject_and_launch
 
 async def _locked_inject(clone_name: str, cookie: str, place_id: str, status_msg=None) -> bool:
     """V7.0: Global StartLock wrapper to prevent concurrent am start calls."""
