@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V10.1 Monolithic Kernel Access
+# main.py — Project Aegis V10.2 Monolithic Kernel Access
 import os
 import sys
 import re
@@ -12,6 +12,34 @@ import threading
 import subprocess
 from typing import Optional, Dict, Tuple
 from datetime import datetime, timedelta
+
+# ═══════════════════════════════════════════════════════════════════════════
+# V10.2: MONOLITHIC run_bash — Global Scope Mandate
+# ═══════════════════════════════════════════════════════════════════════════
+async def run_bash(command: str, use_su: bool = True) -> Tuple[int, str, str]:
+    """
+    V10.2: Standalone global run_bash. Fixed f-string syntax.
+    Returns (returncode, stdout, stderr) — NEVER crashes the caller.
+    """
+    try:
+        if use_su and not command.startswith("su -c"):
+            safe_cmd = command.replace('"', '\\"')
+            command = f'su -c "{safe_cmd}"'
+        
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
+    except Exception as e:
+        return -1, "", str(e)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# VERSION
+# ═══════════════════════════════════════════════════════════════════════════
+VERSION = "10.2"
 
 # ── ABSOLUTE PATH LOCK ─────────────────────────────────────────────────────
 _bot_dir = os.path.dirname(os.path.abspath(__file__))
@@ -30,44 +58,6 @@ from ui_manager          import UIManager
 from monitor             import MonitorEngine
 from injection_engine    import InjectionEngine
 from persistence_manager import PersistenceManager
-
-# ═══════════════════════════════════════════════════════════════════════════
-# V10.1: MONOLITHIC run_bash — Completely standalone, thread-safe
-# ═══════════════════════════════════════════════════════════════════════════
-async def run_bash(command: str, use_su: bool = True) -> Tuple[int, str, str]:
-    """
-    V10.1: Standalone global run_bash. No dependencies, thread-safe.
-    Uses subprocess with optional su -c wrapper.
-    Returns (returncode, stdout, stderr) — NEVER crashes the caller.
-    """
-    try:
-        if use_su and not command.startswith("su -c"):
-            command = f'su -c "{command.replace(\'"\', \\\'\\\')}"'
-        
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
-        return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
-    except Exception as e:
-        # Critical: Never crash the thread, return error tuple
-        return -1, "", str(e)
-
-# ═══════════════════════════════════════════════════════════════════════════
-# VERSION
-# ═══════════════════════════════════════════════════════════════════════════
-VERSION = "10.1"
-
-# ── DEVICE ID ──────────────────────────────────────────────────────────────
-if len(sys.argv) < 2:
-    print("❌  Usage: python main.py <DEVICE_ID>")
-    sys.exit(1)
-
-DEVICE_ID = sys.argv[1]
-FARM_DIR  = _bot_dir
-BOOT_LOG  = os.path.join(FARM_DIR, "boot_log.txt")
 
 # ── LOGGING ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -268,32 +258,30 @@ async def anchor_to_system():
 
     await system_harden()
 
-async def system_harden():
+    async def system_harden(self):
     """
-    V10.1 MONOLITHIC KERNEL ACCESS: Auto OOM -1000 for bot + ALL Roblox PIDs.
+    V10.2 MONOLITHIC KERNEL ACCESS: Auto OOM -1000 for bot + ALL Roblox PIDs.
     Zero-touch automation — runs on every startup without user input.
     """
     pid = os.getpid()
     oom_path = f"/proc/{pid}/oom_score_adj"
     
-    logger.info(f"🔱 V10.1 KERNEL ACCESS: Hardening PID {pid}...")
+    logger.info(f"🔱 V10.2 KERNEL ACCESS: Hardening PID {pid}...")
     
     # Step 1: Apply OOM -1000 to bot itself
-    ret, _, _ = await run_bash(f"echo -1000 > {oom_path}", use_su=True)
-    if ret != 0:
-        ret, _, _ = await run_bash(f"sh -c 'echo -1000 > {oom_path}'", use_su=True)
+    await run_bash(f"echo -1000 > {oom_path}", use_su=True)
     
     # Verification
     verify_ret, verify_out, _ = await run_bash(f"cat {oom_path}", use_su=True)
     current_score = verify_out.strip() if verify_ret == 0 else "ERROR"
     
     if current_score == "-1000":
-        logger.info("🔱 V10.1 KERNEL ACCESS: ✅ Bot OOM score is -1000 — UNKILLABLE")
+        logger.info("🔱 V10.2 KERNEL ACCESS: ✅ Bot OOM score is -1000 — UNKILLABLE")
     else:
-        logger.critical(f"🔱 V10.1 KERNEL ACCESS: ❌ Bot OOM score is {current_score} — CRITICAL!")
+        logger.critical(f"🔱 V10.2 KERNEL ACCESS: ❌ Bot OOM score is {current_score} — CRITICAL!")
     
     # Step 2: Auto-find and harden ALL Roblox PIDs
-    ret, stdout, _ = await run_bash("pgrep -f 'com.roblox' 2>/dev/null", use_su=True)
+    ret, stdout, _ = await run_bash("pgrep -f 'com.roblox'", use_su=True)
     if ret == 0 and stdout.strip():
         roblox_pids = stdout.strip().split('\n')
         protected = 0
@@ -301,44 +289,44 @@ async def system_harden():
             if roblox_pid.strip():
                 await run_bash(f"echo -1000 > /proc/{roblox_pid.strip()}/oom_score_adj", use_su=True)
                 protected += 1
-        logger.info(f"🔱 V10.1 KERNEL ACCESS: Applied OOM -1000 to {protected} Roblox PIDs")
+        logger.info(f"🔱 V10.2 KERNEL ACCESS: Applied OOM -1000 to {protected} Roblox PIDs")
     
     # Step 3: CPU/Nice priority
     await run_bash(f"renice -n -20 -p {pid} 2>/dev/null || renice -n -15 -p {pid}", use_su=True)
     
-    logger.info("🔱 V10.1 KERNEL ACCESS: System hardening complete")
+    logger.info("🔱 V10.2 KERNEL ACCESS: System hardening complete")
 
-# V10.1: BASHRC AUTO-RECOVERY — Checks every run
+# V10.2: BASHRC AUTO-PATCH — Silent auto-launch persistence
 def ensure_bashrc_injected():
     """
-    V10.1: Automatically inject launch command into ~/.bashrc every run.
-    Uses pgrep check to prevent duplicates. Ensures auto-start after reboot.
+    V10.2: Silently ensure ~/.bashrc contains the auto-launch line.
+    Ensures that after a reboot, opening Termux starts the bot automatically.
     """
     try:
         bashrc_path = os.path.expanduser("~/.bashrc")
         
-        # V10.1: The launch string with pgrep protection - ensures only one instance
+        # V10.2: Standard pgrep launch guard
         launch_cmd = f'if ! pgrep -f "python.*main.py.*{DEVICE_ID}" > /dev/null; then cd {_bot_dir} && nohup python main.py {DEVICE_ID} > /dev/null 2>&1 & fi'
         
-        marker = f"# Aegis V10.1 Auto-recovery — {DEVICE_ID}"
+        marker = f"# Aegis V10.2 Auto-patch — {DEVICE_ID}"
         
         # Check if already injected
         if os.path.exists(bashrc_path):
             with open(bashrc_path, 'r') as f:
                 content = f.read()
             if marker in content:
-                logger.debug(f"🔱 V10.1 BASHRC: Already injected for {DEVICE_ID}")
+                logger.debug(f"🔱 V10.2 BASHRC: Persistence verified for {DEVICE_ID}")
                 return
         
-        # Inject into bashrc
+        # Append to bashrc
         with open(bashrc_path, 'a') as f:
             f.write(f"\n{marker}\n")
             f.write(f"{launch_cmd}\n")
         
-        logger.info(f"🔱 V10.1 BASHRC: Auto-recovery injected for {DEVICE_ID}")
+        logger.info(f"🔱 V10.2 BASHRC: Silent auto-patch applied for {DEVICE_ID}")
         
     except Exception as e:
-        logger.warning(f"🔱 V10.1 BASHRC: Injection warning: {e}")
+        logger.warning(f"🔱 V10.2 BASHRC: Patch warning: {e}")
 
 async def protect_child_processes():
     """
@@ -1109,6 +1097,28 @@ class AegisBot:
             if n:
                 self.clone_states[n] = CloneState.STOPPED
 
+        # V10.2: AUTO-RECOVERY & PERSISTENCE (OOM -1000)
+        # Apply OOM immunity to self and all Roblox PIDs during initialization phase
+        asyncio.create_task(self._init_kernel_hardening())
+
+    async def _init_kernel_hardening(self):
+        """V10.2: Recursive OOM -1000 application on startup."""
+        try:
+            pid = os.getpid()
+            # 1. Harden bot self
+            await run_bash(f"echo -1000 > /proc/{pid}/oom_score_adj", use_su=True)
+            
+            # 2. Find and harden ALL Roblox PIDs recursively
+            ret, stdout, _ = await run_bash("pgrep -f 'com.roblox'", use_su=True)
+            if ret == 0 and stdout.strip():
+                pids = stdout.strip().split('\n')
+                for p in pids:
+                    if p.strip():
+                        await run_bash(f"echo -1000 > /proc/{p.strip()}/oom_score_adj", use_su=True)
+            logger.info("🔱 V10.2 KERNEL: Auto-hardening complete (Bot + Roblox)")
+        except Exception as e:
+            logger.debug(f"V10.2 kernel hardening warning: {e}")
+
     # ── State helpers ─────────────────────────────────────────────────────
     def set_state(self, name: str, state: CloneState):
         old = self.clone_states.get(name, CloneState.STOPPED)
@@ -1626,9 +1636,9 @@ class AegisBot:
             sys.exit(1)
         
         try:
-            # V10.0: SELF-HEALING AUTO-ROOT — System hardening on startup
-            logger.info(f"🔱 PROJECT AEGIS V10.0 KERNEL AUTO-ROOT — {DEVICE_ID}")
-            await system_harden()
+            # V10.2: SELF-HEALING AUTO-ROOT — System hardening on startup
+            logger.info(f"🔱 PROJECT AEGIS V10.2 KERNEL AUTO-ROOT — {DEVICE_ID}")
+            await self.system_harden()
             
             # V10.0: BASHRC AUTO-INJECTOR — Check every run
             ensure_bashrc_injected()

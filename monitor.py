@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# monitor.py — Project Aegis V10.1 Monolithic Kernel Access
+# monitor.py — Project Aegis V10.2 Monolithic Kernel Access
 import os
 import re
 import logging
@@ -8,26 +8,28 @@ import asyncio
 from typing import Optional, Dict, Tuple
 from bash_utils import run_bash
 
-logger = logging.getLogger("MonitorEngineV101")
+logger = logging.getLogger("MonitorEngineV102")
 
 class MonitorEngine:
     
     # ═══════════════════════════════════════════════════════════════════════
-    # V10.1 MONOLITHIC KERNEL ACCESS — Hard-coded su -c "cat /proc/[PID]/status | grep Threads"
+    # V10.2 MONOLITHIC KERNEL ACCESS — Hard-coded su -c "cat /proc/[PID]/status | grep Threads"
     # ═══════════════════════════════════════════════════════════════════════
     
     @staticmethod
-    async def get_thread_count_v101(pid: str) -> Tuple[int, str]:
+    async def get_thread_count_v102(pid: str) -> Tuple[int, str]:
         """
-        V10.1 PRIMARY: Monolithic kernel access — su -c "cat /proc/[PID]/status | grep Threads"
+        V10.2 PRIMARY: Monolithic kernel access — su -c "cat /proc/[PID]/status | grep Threads"
         Returns (thread_count, status). On failure: returns (0, "[ERR]") — NO FALLBACK.
         """
         if not pid:
             return 0, "[ERR]"
         
-        # V10.1: ABSOLUTE KERNEL SIGHT — ONLY this method, no alternatives
+        # V10.2: DIRECT KERNEL SIGHT — ONLY this method, no alternatives
         try:
-            ret, stdout, _ = await run_bash(f"su -c 'cat /proc/{pid}/status | grep Threads'")
+            # Clean string parsing to avoid errors
+            cmd = f"cat /proc/{pid}/status | grep Threads"
+            ret, stdout, _ = await run_bash(f"su -c '{cmd}'")
             if ret == 0 and stdout:
                 # Parse "Threads: 159" → extract 159
                 match = re.search(r'Threads:\s*(\d+)', stdout)
@@ -37,18 +39,17 @@ class MonitorEngine:
                         return count, "idle"  # 1 thread = IDLE/LOADING
                     elif count > 1:
                         return count, "active"
-            # Command worked but no match = PID dead or invalid
             return 0, "[ERR]"
         except Exception as e:
-            logger.debug(f"V10.1: Thread count failed for PID {pid}: {e}")
+            logger.debug(f"V10.2: Thread count failed for PID {pid}: {e}")
             return 0, "[ERR]"
     
     @staticmethod
     async def get_thread_count_kernel(pid: str) -> Tuple[int, str]:
         """
-        V10.1: All kernel thread counting routes through monolithic V10.1 method.
+        V10.2: All kernel thread counting routes through monolithic V10.2 method.
         """
-        return await MonitorEngine.get_thread_count_v101(pid)
+        return await MonitorEngine.get_thread_count_v102(pid)
     
     # ═══════════════════════════════════════════════════════════════════════
     # V7.1 THREAD TELEMETRY HISTORY — Tracks thread counts for freeze detection
