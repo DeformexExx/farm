@@ -27,8 +27,22 @@ from config_manager      import ConfigManager
 from ui_manager          import UIManager
 from monitor             import MonitorEngine
 from injection_engine    import InjectionEngine
-from bash_utils          import run_bash
+from bash_utils          import run_bash as _run_bash
 from persistence_manager import PersistenceManager
+
+# ═══════════════════════════════════════════════════════════════════════════
+# V10.0: GLOBAL run_bash WRAPPER — Handles errors without crashing
+# ═══════════════════════════════════════════════════════════════════════════
+async def run_bash(command: str) -> tuple:
+    """
+    V10.0: Global wrapper for bash commands with error handling.
+    Returns (returncode, stdout, stderr) without crashing the main loop.
+    """
+    try:
+        return await _run_bash(command)
+    except Exception as e:
+        logger.error(f"🔱 V10.0 run_bash error: {e}")
+        return -1, "", str(e)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
