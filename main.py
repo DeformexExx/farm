@@ -203,6 +203,12 @@ class AegisBot:
         # {clone_name: CloneState}
         self.clone_states: Dict[str, CloneState] = {}
 
+        # ── MAINTENANCE ───────────────────────────────────────────────────
+        self.maintenance_enabled: bool = False
+        self.maintenance_minutes: int  = 30
+        self._maint_in_progress: bool  = False
+        self._waiting_for_timer: bool  = False
+
         # Uptime tracking: {clone_name: timestamp when RUNNING reached}
         self.running_since: Dict[str, float] = {}
 
@@ -260,6 +266,31 @@ class AegisBot:
         if   t == "📱 DEVICE": await self._open_device(update)
         elif t == "🤖 CLONES": await self.open_clones_hub(update)
         elif t == "⚙️ SYSTEM": await self._open_system(update)
+        elif t == "⚙️ Maintenance": await self._open_maintenance(update)
+        elif self._waiting_for_timer: await self._handle_timer_input(update)
+
+    async def _open_maintenance(self, update: Update):
+        await update.message.reply_text(
+            "🛠 *MAINTENANCE SETTINGS*\n"
+            f"Auto-Purge: `{'ENABLED' if self.maintenance_enabled else 'DISABLED'}`\n"
+            f"Interval: `{self.maintenance_minutes} min`",
+            reply_markup=UIManager.get_maintenance_keyboard(self.maintenance_enabled, self.maintenance_minutes),
+            parse_mode="Markdown"
+        )
+
+    async def _handle_timer_input(self, update: Update):
+        t = update.message.text
+        if t.isdigit():
+            mins = int(t)
+            if 5 <= mins <= 1440:
+                self.maintenance_minutes = mins
+                self._waiting_for_timer = False
+                await update.message.reply_text(f"✅ Timer set to `{mins}` minutes.", parse_mode="Markdown")
+                await self._open_maintenance(update)
+            else:
+                await update.message.reply_text("❌ Please enter a value between 5 and 1440.")
+        else:
+            await update.message.reply_text("❌ Invalid input. Please send only digits (minutes).")
 
     async def _open_device(self, update: Update):
         ram, cpu, temp = await MonitorEngine.get_system_stats()
@@ -366,6 +397,21 @@ class AegisBot:
                     f"⚙️ *{name.upper()}*\nState: `{state}`",
                     reply_markup=kb, parse_mode="Markdown"
                 )
+
+            elif d == "maint_toggle":
+                self.maintenance_enabled = not self.maintenance_enabled
+                await q.edit_message_reply_markup(
+                    UIManager.get_maintenance_keyboard(self.maintenance_enabled, self.maintenance_minutes))
+
+            elif d == "maint_set_timer":
+                self._waiting_for_timer = True
+                await q.message.reply_text("⏱ *SET TIMER*\nSend the maintenance interval in minutes (e.g., `60`).", parse_mode="Markdown")
+
+            elif d == "maint_run_now":
+                if self._maint_in_progress:
+                    await q.message.reply_text("⚠️ Maintenance already in progress.")
+                else:
+                    asyncio.create_task(self.run_maintenance_cycle(chat))
 
         except Exception as e:
             logger.error(f"Callback [{d}] error: {e}")
@@ -525,6 +571,58 @@ class AegisBot:
         except Exception as e:
             logger.error(f"git_sync error: {e}")
 
+    # ── MAINTENANCE CYCLE ────────────────────────────────────────────────
+    async def run_maintenance_cycle(self, chat_id: Optional[int] = None):
+        if self._maint_in_progress: return
+        self._maint_in_progress = True
+        
+        target_chat = chat_id or (self.config.admin_ids[0] if self.config.admin_ids else None)
+
+        async def notify(text):
+            if target_chat and self.application:
+                try:
+                    await self.application.bot.send_message(target_chat, text, parse_mode="Markdown")
+                except Exception: pass
+
+        await notify("🔄 *Starting scheduled maintenance...*\n`[THE PURGE]`")
+        logger.warning("Maintenance: Starting purge cycle.")
+
+        # 1. Kill all clones
+        await run_bash('su -c "am force-stop com.roblox.client*"')
+        
+        # 2. Clear junk
+        await run_bash('su -c "rm -rf /data/data/com.roblox.client*/cache/*"')
+        await run_bash('su -c "rm -rf /data/data/com.roblox.client*/code_cache/*"')
+        
+        await notify("🧹 Cache purged. Waiting 5s...")
+        await asyncio.sleep(5)
+
+        # 3. Restart active clones (b, c, e, f, g, i)
+        active_sequence = ["clienb", "clienc", "cliene", "clienf", "clieng", "clieni"]
+        await notify(f"🚀 Restarting sequence: `{', '.join(active_sequence)}`")
+
+        for idx, name in enumerate(active_sequence):
+            # We don't use _enqueue_start directly because we want 15s stagger
+            # But we SHOULD use the lock if it's available? 
+            # The requirement says "15s stagger", let's use the sequence logic.
+            asyncio.create_task(self._enqueue_start(name, target_chat))
+            if idx < len(active_sequence) - 1:
+                await asyncio.sleep(15)
+
+        await notify("✅ *Maintenance Cycle Complete.*")
+        self._maint_in_progress = False
+
+    async def _maint_timer_loop(self):
+        """Checks every minute if maintenance is due."""
+        last_run = time.time()
+        while True:
+            await asyncio.sleep(60)
+            if self.maintenance_enabled and not self._maint_in_progress:
+                elapsed = (time.time() - last_run) / 60
+                if elapsed >= self.maintenance_minutes:
+                    await self.run_maintenance_cycle()
+                    last_run = time.time()
+
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Unhandled exception: {context.error}", exc_info=context.error)
         admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
@@ -560,6 +658,9 @@ class AegisBot:
 
         # 5. Launch Watchdog (state-gated, uses application explicitly)
         asyncio.create_task(watchdog_loop(app, self))
+
+        # 5b. Launch Maintenance Timer
+        asyncio.create_task(self._maint_timer_loop())
 
         # 6. Auto-resume
         asyncio.create_task(self._auto_resume())

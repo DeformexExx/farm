@@ -34,7 +34,7 @@ class UIManager:
     def get_main_keyboard() -> ReplyKeyboardMarkup:
         return ReplyKeyboardMarkup([
             [KeyboardButton("📱 DEVICE"), KeyboardButton("🤖 CLONES")],
-            [KeyboardButton("⚙️ SYSTEM")],
+            [KeyboardButton("⚙️ SYSTEM"), KeyboardButton("⚙️ Maintenance")],
         ], resize_keyboard=True)
 
     # ── DEVICE DASHBOARD ──────────────────────────────────────────────────
@@ -70,6 +70,16 @@ class UIManager:
             [InlineKeyboardButton(f"🔄 AUTO-RESTORE: {r}", callback_data="toggle_restore")],
             [InlineKeyboardButton("❓ HELP",                callback_data="sys_help")],
             [InlineKeyboardButton("🏠 BACK",               callback_data="nav_home")],
+        ])
+
+    @staticmethod
+    def get_maintenance_keyboard(enabled: bool, minutes: int) -> InlineKeyboardMarkup:
+        state = "🟢 ON" if enabled else "🔴 OFF"
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"Toggle: [{state}]", callback_data="maint_toggle")],
+            [InlineKeyboardButton(f"⏱ Set Timer: {minutes}m", callback_data="maint_set_timer")],
+            [InlineKeyboardButton("🚀 Run Now", callback_data="maint_run_now")],
+            [InlineKeyboardButton("🏠 BACK", callback_data="nav_home")],
         ])
 
     # ── CLONE HUB TEXT — V4.0 State Machine Cards ─────────────────────────
