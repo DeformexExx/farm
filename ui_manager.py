@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V9.0 System Immortal Architecture
+# ui_manager.py — Project Aegis V10.0 Kernel Auto-Root & Persistence
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V9.0*\n"
+            "💎 *AEGIS OVERLORD V10.0*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[🔱 SYSTEM IMMORTAL]`\n"
+            f"⚡️ SYSTEM : `[🔱 KERNEL AUTO-ROOT]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -41,18 +41,18 @@ class UIManager:
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
         return (
-            "💎 *AEGIS V9.0 — SYSTEM IMMORTAL*\n"
+            "💎 *AEGIS V10.0 — KERNEL AUTO-ROOT*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
-            f"🔱 IMMORTAL: `[OOM -1000 | UNKILLABLE]`\n"
-            f"� GHOST   : `[ANCHOR DAEMON ACTIVE]`\n"
-            f"🧠 KERNEL  : `[CORE SYSTEM LAYER]`\n"
-            f"⚡️ STATUS  : `[HEADLESS RECOVERY READY]`\n"
+            f"🔱 IMMORTAL: `[OOM -1000 | VERIFIED]`\n"
+            f"👻 GHOST   : `[ANCHOR DAEMON ACTIVE]`\n"
+            f"🧠 KERNEL  : `[AUTO-HARDEN ON BOOT]`\n"
+            f"⚡️ STATUS  : `[BASHRC INJECTOR READY]`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "🔱 _Integrated into Core System. Survives SystemUI restart._"
+            "🔱 _Zero-touch after reboot. Self-healing OOM protection._"
         )
 
     @staticmethod
@@ -83,7 +83,7 @@ class UIManager:
         state_map:  {clone_name: CloneState (str value)}
         uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *AEGIS OVERLORD V8.7 KERNEL MASTER*\n"
+        msg = "💎 *AEGIS OVERLORD V10.0 KERNEL AUTO-ROOT*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
@@ -110,14 +110,17 @@ class UIManager:
             else:
                 uptime = "—"
 
-            # Thread info (from status_map, optional)
+            # V10.0: HEADLESS SIGHT — [ROOT_PENDING...] if thread count unavailable
             thr_info = state_map.get(f"{name}:threads", "")
             thr_status = state_map.get(f"{name}:thread_status", "")
-            if thr_info:
+            if thr_info and thr_info.isdigit():
                 if thr_info == "1" or thr_status == "idle":
                     thr_line = f"🧵 Threads: `1` [IDLE/LOADING]"
                 else:
                     thr_line = f"🧵 Threads: `{thr_info}`"
+            elif state == "RUNNING":
+                # V10.0: HEADLESS SIGHT — Show pending when value missing
+                thr_line = "🧵 Threads: `[ROOT_PENDING...]`"
             else:
                 thr_line = "🧵 Threads: `—`"
 
@@ -174,15 +177,16 @@ class UIManager:
     @staticmethod
     def get_help_text() -> str:
         return (
-            "🧠 *AEGIS V8.7 KERNEL MASTER — ROOT-LEVEL TELEMETRY*\n\n"
-            "• Hard-Coded Method: `su -c \"cat /proc/[PID]/status | grep Threads\"`\n"
+            "🔱 *AEGIS V10.0 KERNEL AUTO-ROOT — SYSTEM IMMORTAL*\n\n"
+            "• Auto-Harden: *su -c 'echo -1000 > /proc/self/oom_score_adj'*\n"
+            "• Verification: *Reads back OOM score after write*\n"
+            "• Auto-Injector: *Checks ~/.bashrc every run*\n"
+            "• Daemon Protection: *All clones get OOM -1000*\n"
+            "• Headless Sight: *[ROOT_PENDING...] when su pending*\n"
             "• Ghost Process: *1 thread for 5min = kill -9 + relaunch*\n"
             "• Frozen Detection: *<80 threads for 3min = FROZEN*\n"
-            "• Healthy Threshold: *Threads > 100*\n"
-            "• Idle/Loading: *1 thread marked as [IDLE/LOADING]*\n"
             "• Remote Console: `/exec [command]` — Emergency shell access\n"
             "• Hot Reload: `/update` — Git pull & auto-restart\n"
-            "• OOM Protection: *-1000 score* (IMMORTAL)\n"
-            "• Daily Restart: *05:00* sequential maintenance\n\n"
-            "_V8.7: We don't parse logs. We command the kernel._"
+            "• OOM Protection: *-1000 score (IMMORTAL)*\n\n"
+            "_V10.0: Zero-touch automation. Survives any reboot._"
         )

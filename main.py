@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V9.0 System Immortal Architecture
+# main.py — Project Aegis V10.0 Kernel Auto-Root & Persistence
 import os
 import sys
 import enum
@@ -33,7 +33,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "9.0"
+VERSION = "10.0"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -53,7 +53,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV90")
+logger = logging.getLogger("AegisV100")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -241,10 +241,89 @@ async def anchor_to_system():
     
     logger.info("🔱 V9.0 SYSTEM IMMORTAL: Anchoring complete — Bot integrated into Core System Layer")
 
+    await system_harden()
+
+async def system_harden():
+    """
+    V10.0 SELF-HEALING AUTO-ROOT: Apply OOM -1000 protection on startup with verification.
+    Retries with different su methods if initial write fails.
+    """
+    pid = os.getpid()
+    oom_path = f"/proc/{pid}/oom_score_adj"
+    
+    logger.info(f"🔱 V10.0 SYSTEM HARDEN: Hardening PID {pid}...")
+    
+    # Method 1: Direct su echo
+    ret, _, _ = await run_bash(f"su -c 'echo -1000 > {oom_path}'")
+    
+    # Method 2: If first failed, try sh -c wrapper
+    if ret != 0:
+        logger.warning("🔱 V10.0: Method 1 failed, trying Method 2 (sh -c wrapper)...")
+        ret, _, _ = await run_bash(f"su -c 'sh -c \"echo -1000 > {oom_path}\"'")
+    
+    # Method 3: If still failed, try with exec
+    if ret != 0:
+        logger.warning("🔱 V10.0: Method 2 failed, trying Method 3 (exec)...")
+        ret, _, _ = await run_bash(f"su -c 'exec echo -1000 > {oom_path}'")
+    
+    # VERIFICATION: Read back the value
+    verify_ret, verify_out, _ = await run_bash(f"su -c 'cat {oom_path}'")
+    current_score = verify_out.strip() if verify_ret == 0 else "ERROR"
+    
+    if current_score == "-1000":
+        logger.info("🔱 V10.0 SYSTEM HARDEN: ✅ OOM score verified as -1000 — BOT IS UNKILLABLE")
+    else:
+        logger.critical(f"🔱 V10.0 SYSTEM HARDEN: ❌ OOM score is {current_score}, expected -1000 — BOT MAY BE KILLED BY LMK!")
+        # Emergency: try one more time with different approach
+        await run_bash(f"su -c 'echo -1000 > {oom_path} 2>/dev/null; cat {oom_path}'")
+    
+    # Apply CPU priority
+    await run_bash(f"su -c 'renice -n -20 -p {pid} 2>/dev/null || renice -n -15 -p {pid}'")
+    
+    # CPU isolation
+    await run_bash(f"su -c 'taskset -cp 0 {pid} 2>/dev/null'")
+    
+    # I/O priority
+    await run_bash(f"su -c 'ionice -c 1 -n 0 -p {pid} 2>/dev/null'")
+    
+    logger.info("🔱 V10.0 SYSTEM HARDEN: Hardening complete")
+
+# V10.0: BASHRC AUTO-INJECTOR — Checks every run
+def ensure_bashrc_injected():
+    """
+    V10.0: Automatically inject launch command into ~/.bashrc every run.
+    Uses pgrep check to prevent duplicates.
+    """
+    try:
+        bashrc_path = os.path.expanduser("~/.bashrc")
+        
+        # V10.0: The launch string with pgrep protection
+        launch_cmd = f'[ -z "$(pgrep -f \"python.*main.py.*{DEVICE_ID}\")" ] && cd {_bot_dir} && nohup python main.py {DEVICE_ID} > /dev/null 2>&1 &'
+        
+        marker = f"# Aegis V10.0 Auto-boot — {DEVICE_ID}"
+        
+        # Check if already injected
+        if os.path.exists(bashrc_path):
+            with open(bashrc_path, 'r') as f:
+                content = f.read()
+            if marker in content:
+                logger.debug(f"🔱 V10.0 BASHRC: Already injected for {DEVICE_ID}")
+                return
+        
+        # Inject into bashrc
+        with open(bashrc_path, 'a') as f:
+            f.write(f"\n{marker}\n")
+            f.write(f"{launch_cmd}\n")
+        
+        logger.info(f"🔱 V10.0 BASHRC: Auto-injected launch command for {DEVICE_ID}")
+        
+    except Exception as e:
+        logger.warning(f"🔱 V10.0 BASHRC: Injection warning: {e}")
+
 async def protect_child_processes():
     """
-    V9.0: Apply -1000 OOM protection to ALL child processes recursively.
-    Makes ADB, shell, and all subprocesses "Unkillable" by Android LMK.
+    V10.0: Apply -1000 OOM protection to ALL child processes recursively.
+    Makes clones, ADB, shell, and all subprocesses "Unkillable" by Android LMK.
     """
     try:
         bot_pid = os.getpid()
@@ -273,9 +352,9 @@ async def protect_child_processes():
                             await run_bash(f"su -c 'echo -1000 > /proc/{grandchild.strip()}/oom_score_adj 2>/dev/null'")
                             protected_count += 1
             
-            logger.info(f"� V9.0: Applied OOM protection to {protected_count} child processes")
+            logger.info(f"🔱 V10.0: Applied OOM protection to {protected_count} child processes")
     except Exception as e:
-        logger.debug(f"� V9.0: Child protection warning: {e}")
+        logger.debug(f"🔱 V10.0: Child protection warning: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # V8.0 EMERGENCY RAM RECOVERY — STOP/CONT Protocol
@@ -1527,9 +1606,12 @@ class AegisBot:
             sys.exit(1)
         
         try:
-            # 1. ANCHOR TO SYSTEM
-            logger.info(f"� PROJECT AEGIS V8.2 DIRECT KERNEL THREAD COUNTING — {DEVICE_ID}")
-            await anchor_to_system()
+            # V10.0: SELF-HEALING AUTO-ROOT — System hardening on startup
+            logger.info(f"🔱 PROJECT AEGIS V10.0 KERNEL AUTO-ROOT — {DEVICE_ID}")
+            await system_harden()
+            
+            # V10.0: BASHRC AUTO-INJECTOR — Check every run
+            ensure_bashrc_injected()
             
             # 2. V8.0: Scan and adopt existing clones before starting new ones
             await scan_and_adopt_clones(self)
@@ -1566,7 +1648,7 @@ class AegisBot:
             # 7. Auto-resume
             asyncio.create_task(self._auto_resume())
 
-            logger.info(f"� PROJECT AEGIS V8.2 KERNEL SCANNER ACTIVE — {DEVICE_ID}")
+            logger.info(f"🔱 PROJECT AEGIS V10.0 KERNEL AUTO-ROOT ACTIVE — {DEVICE_ID}")
 
             # 8. Poll
             await app.updater.start_polling(drop_pending_updates=True)

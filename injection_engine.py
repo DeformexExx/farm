@@ -242,6 +242,20 @@ class InjectionEngine:
                     ret, stdout, stderr = await run_bash(join_cmd)
                 
             await update_status(f"✅ Запущено ({clone_name})")
+            
+            # V10.0: DAEMON CHILD PROTECTION — Apply OOM immunity to clone
+            try:
+                await asyncio.sleep(2)  # Wait for clone to initialize
+                from bash_utils import run_bash
+                ret, pid_out, _ = await run_bash(f"su -c 'pgrep -f \"com.roblox.{clone_name}\" 2>/dev/null || echo NONE'")
+                if ret == 0 and pid_out.strip() not in ("", "NONE"):
+                    clone_pid = pid_out.strip().split('\n')[0]
+                    if clone_pid.isdigit():
+                        await run_bash(f"su -c 'echo -1000 > /proc/{clone_pid}/oom_score_adj 2>/dev/null'")
+                        logger.info(f"🔱 V10.0: Applied OOM -1000 to {clone_name} (PID {clone_pid})")
+            except Exception as e:
+                logger.debug(f"🔱 V10.0: Clone OOM protection warning: {e}")
+            
             return True
             
         except Exception as e:
