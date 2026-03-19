@@ -33,7 +33,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "8.5"
+VERSION = "8.7"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -53,7 +53,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV85")
+logger = logging.getLogger("AegisV87")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -546,33 +546,22 @@ async def force_redraw() -> bool:
         return False
 async def keepalive_daemon(bot_instance: "AegisBot"):
     """
-    V8.0 HARD-CORE: System-Critical Keep-Alive with Interface Isolation.
-    Detects SystemUI crashes and switches to Pure Shell Mode.
-    Triggers emergency RAM recovery when needed.
+    V8.5: Keep-Alive Daemon - Removed Pure Shell Mode trigger.
+    Bot ALWAYS attempts telemetry and UI updates regardless of SystemUI status.
     """
     global _system_ui_crashed
     
-    logger.info("👑 V8.0 GOD MODE: Keep-Alive Daemon started")
+    logger.info("👑 V8.5 KEEP-ALIVE: Daemon started (Pure Shell Mode DISABLED)")
     heartbeat_count = 0
-    ui_check_counter = 0
     
     while True:
         await asyncio.sleep(30)  # Check every 30 seconds
         heartbeat_count += 1
-        ui_check_counter += 1
         
         try:
-            # V8.0: SystemUI Health Check every 60 seconds
-            if ui_check_counter >= 2:
-                ui_check_counter = 0
-                ui_healthy = await check_system_ui_health()
-                
-                if not ui_healthy and not _system_ui_crashed:
-                    # SystemUI crashed - enter Pure Shell Mode
-                    await enter_pure_shell_mode(bot_instance)
-                elif ui_healthy and _system_ui_crashed:
-                    # SystemUI recovered - exit Pure Shell Mode
-                    await exit_pure_shell_mode(bot_instance)
+            # V8.5: REMOVED SystemUI Health Check - was causing false positives
+            # Bot now ALWAYS attempts telemetry and UI updates
+            # unless the Python process itself is dying
             
             # 1. Headless heartbeat - input tap with device ID (bypasses UI)
             await run_bash("su -c 'input -d 0 tap 540 960' 2>/dev/null || su -c 'input tap 540 960' 2>/dev/null || true")
@@ -600,16 +589,15 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
                     if not verified:
                         pid = await InjectionEngine.get_clone_pid(name)
                         if not pid:
-                            logger.warning(f"👑 V8.0: [{name}] Lost via dumpsys & pidof, marking STOPPED")
+                            logger.warning(f"👑 V8.5: [{name}] Lost via dumpsys & pidof, marking STOPPED")
                             bot_instance.set_state(name, CloneState.STOPPED)
             
             # 7. Periodic logging
             if heartbeat_count % 10 == 0:  # Every 5 minutes
-                mode_str = "SHELL-MODE" if _system_ui_crashed else "NORMAL"
-                logger.info(f"👑 V8.0 Keep-Alive #{heartbeat_count} [Mode: {mode_str}]")
+                logger.info(f"👑 V8.5 Keep-Alive #{heartbeat_count}")
                         
         except Exception as e:
-            logger.error(f"👑 V8.0 Keep-Alive error: {e}")
+            logger.error(f"👑 V8.5 Keep-Alive error: {e}")
             await asyncio.sleep(5)
 
 
@@ -726,7 +714,7 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     # SILENT START: Skip everything for first 10 minutes
     boot_time = time.time()
     
-    logger.info("🔬 V8.2 WATCHDOG: Direct Kernel Thread Counting initialized")
+    logger.info("🧠 V8.7 WATCHDOG: Kernel Master initialized — Ghost & Frozen detection active")
     
     while True:
         await asyncio.sleep(60)
@@ -774,27 +762,55 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                         # Clone is actually running, /proc just unavailable
                         continue
                 
-                # V8.2 KERNEL-BASED FREEZE DETECTION — Threads < 50 for 5 minutes
+                # V8.7 SMART WATCHDOG — Ghost Process & Frozen Detection
                 needs_action = False
                 reason       = ""
                 
-                # Check thread-based freeze (Threads < 50 for 5 minutes)
-                if MonitorEngine.is_thread_frozen(name, threshold=50):
+                # Check 1: Ghost Process (1 thread for 5 minutes)
+                if MonitorEngine.is_ghost_process(name):
+                    reason = "GHOST PROCESS (1 thread for 5min)"
+                    needs_action = True
+                    # Get PID and kill it immediately
+                    pid = await InjectionEngine.get_clone_pid(name)
+                    if pid:
+                        await MonitorEngine.kill_ghost_process(pid, name)
+                        admin = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
+                        if admin:
+                            try:
+                                await application.bot.send_message(
+                                    admin,
+                                    f"👻 *V8.7 GHOST KILL*: `{name}`\n1 thread for 5min — killed with -9",
+                                    parse_mode="Markdown"
+                                )
+                            except TelegramError:
+                                pass
+                
+                # Check 2: Frozen Detection (<80 threads for 3 minutes)
+                elif MonitorEngine.is_frozen_v87(name):
                     freeze_strikes[name] = freeze_strikes.get(name, 0) + 1
-                    if freeze_strikes[name] >= 3:  # V8.2: 3 strikes before action
+                    if freeze_strikes[name] >= 2:  # 2 strikes before action
+                        reason = f"FROZEN (<80 threads for 3min ×{freeze_strikes[name]})"
+                        needs_action = True
+                    else:
+                        logger.warning(f"🥶 V8.7 [{name}] Frozen strike {freeze_strikes[name]}/2 (<80 threads)")
+                
+                # Check 3: Legacy thread-based freeze (Threads < 50 for 5 minutes)
+                elif MonitorEngine.is_thread_frozen(name, threshold=50):
+                    freeze_strikes[name] = freeze_strikes.get(name, 0) + 1
+                    if freeze_strikes[name] >= 3:
                         reason = f"FROZEN (Threads<50 for 5min ×{freeze_strikes[name]})"
                         needs_action = True
                     else:
-                        logger.warning(f"🧊 V8.2 [{name}] Freeze strike {freeze_strikes[name]}/3 (Threads<50)")
+                        logger.warning(f"🧊 V8.7 [{name}] Freeze strike {freeze_strikes[name]}/3 (Threads<50)")
                 
-                # Check CPU-based freeze (<1% for 120s)
+                # Check 4: CPU-based freeze (<1% for 120s)
                 elif MonitorEngine.is_cpu_frozen(name):
                     freeze_strikes[name] = freeze_strikes.get(name, 0) + 1
-                    if freeze_strikes[name] >= 3:  # V8.2: 3 strikes before action
+                    if freeze_strikes[name] >= 3:
                         reason = f"FROZEN (CPU stall ×{freeze_strikes[name]})"
                         needs_action = True
                     else:
-                        logger.warning(f"🧊 V8.2 [{name}] Freeze strike {freeze_strikes[name]}/3 (CPU stall)")
+                        logger.warning(f"🧊 V8.7 [{name}] Freeze strike {freeze_strikes[name]}/3 (CPU stall)")
                 else:
                     freeze_strikes[name] = 0  # Reset on healthy readings
 
@@ -1061,6 +1077,21 @@ class AegisBot:
 
     def _build_hub_text(self) -> str:
         state_map  = {n: s.value for n, s in self.clone_states.items()}
+        
+        # V8.7: Add thread counts to state_map for UI display
+        for name, state in self.clone_states.items():
+            if state == CloneState.RUNNING:
+                # Get thread count from history (last recorded value)
+                history = MonitorEngine._thread_history.get(name, [])
+                if history:
+                    last_count = history[-1][1]
+                    if last_count >= 0:
+                        state_map[f"{name}:threads"] = str(last_count)
+                        if last_count == 1:
+                            state_map[f"{name}:thread_status"] = "idle"
+                        else:
+                            state_map[f"{name}:thread_status"] = "active"
+        
         return UIManager.format_clones_hub(self.config.clones_data, state_map, self.running_since)
 
     async def refresh_dashboard(self, force=False):

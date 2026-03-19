@@ -1,60 +1,53 @@
 # -*- coding: utf-8 -*-
-# monitor.py — Project Aegis V8.2 Direct Kernel Thread Counting
+# monitor.py — Project Aegis V8.7 Root-Level Telemetry Integration
 import os
 import re
 import logging
 import time
+import asyncio
 from typing import Optional, Dict, Tuple
 from bash_utils import run_bash
 
-logger = logging.getLogger("MonitorEngine")
+logger = logging.getLogger("MonitorEngineV87")
 
 class MonitorEngine:
     
     # ═══════════════════════════════════════════════════════════════════════
-    # V8.2 KERNEL SCANNER — Direct /proc access for reliable thread counting
+    # V8.7 ROOT-LEVEL TELEMETRY — Hard-coded su -c "cat /proc/[PID]/status | grep Threads"
     # ═══════════════════════════════════════════════════════════════════════
+    
+    @staticmethod
+    async def get_thread_count_v87(pid: str) -> Tuple[int, str]:
+        """
+        V8.7 PRIMARY: Hard-coded method — su -c "cat /proc/[PID]/status | grep Threads"
+        Returns (thread_count, status) where status is 'active', 'idle', or 'error'.
+        """
+        if not pid:
+            return -1, "error"
+        
+        # V8.7: HARD-CODED SUCCESSFUL METHOD
+        try:
+            ret, stdout, _ = await run_bash(f"su -c 'cat /proc/{pid}/status | grep Threads'")
+            if ret == 0 and stdout:
+                # Parse "Threads: 159" → extract 159
+                match = re.search(r'Threads:\s*(\d+)', stdout)
+                if match:
+                    count = int(match.group(1))
+                    if count == 1:
+                        return count, "idle"  # 1 thread = IDLE/LOADING
+                    elif count > 1:
+                        return count, "active"
+            return -1, "error"
+        except Exception as e:
+            logger.debug(f"V8.7: Thread count failed for PID {pid}: {e}")
+            return -1, "error"
     
     @staticmethod
     async def get_thread_count_kernel(pid: str) -> Tuple[int, str]:
         """
-        V8.2 PRIMARY: Read thread count directly from /proc/[PID]/status.
-        Returns (thread_count, source) where source is 'kernel', 'task', or 'none'.
+        V8.7: Redirect to hard-coded V8.7 method. Deprecated old logic.
         """
-        if not pid:
-            return -1, "none"
-        
-        # PRIMARY: Read /proc/[PID]/status
-        try:
-            ret, stdout, _ = await run_bash(f"su -c 'cat /proc/{pid}/status 2>/dev/null'")
-            if ret == 0 and stdout:
-                for line in stdout.split('\n'):
-                    if line.startswith('Threads:'):
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            try:
-                                count = int(parts[1])
-                                return count, "kernel"
-                            except ValueError:
-                                pass
-        except Exception as e:
-            logger.debug(f"V8.2: Kernel status read failed for PID {pid}: {e}")
-        
-        # FALLBACK: Count entries in /proc/[PID]/task/
-        try:
-            ret, stdout, _ = await run_bash(f"su -c 'ls /proc/{pid}/task/ 2>/dev/null | wc -l'")
-            if ret == 0 and stdout.strip():
-                try:
-                    count = int(stdout.strip())
-                    if count > 0:
-                        return count, "task"
-                except ValueError:
-                    pass
-        except Exception as e:
-            logger.debug(f"V8.2: Task directory fallback failed for PID {pid}: {e}")
-        
-        # Return -1 to indicate unable to read (not 0 which means dead)
-        return -1, "none"
+        return await MonitorEngine.get_thread_count_v87(pid)
     
     # ═══════════════════════════════════════════════════════════════════════
     # V7.1 THREAD TELEMETRY HISTORY — Tracks thread counts for freeze detection
@@ -255,6 +248,92 @@ class MonitorEngine:
         
         # All readings must be < 1% to be considered frozen
         return all(cpu >= 0 and cpu < 1.0 for cpu in recent)
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # V8.7 SMART WATCHDOG — Ghost Process & Frozen Detection
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    @staticmethod
+    def is_ghost_process(clone_name: str) -> bool:
+        """
+        V8.7 GHOST PROCESS DETECTION:
+        Returns True if thread count == 1 for more than 5 minutes (300s).
+        A 1-thread process is IDLE/LOADING and should be killed and relaunched.
+        """
+        history = MonitorEngine._thread_history.get(clone_name, [])
+        if not history:
+            return False
+        
+        now = time.time()
+        
+        # Check if thread count has been exactly 1 for 5+ minutes
+        first_one_thread = None
+        for ts, count in reversed(history):
+            if count < 0:  # Skip error readings
+                continue
+            if count != 1:  # Not 1 thread anymore
+                break
+            first_one_thread = ts
+        
+        if first_one_thread and (now - first_one_thread) >= 300:
+            return True
+        
+        return False
+    
+    @staticmethod
+    def is_frozen_v87(clone_name: str) -> bool:
+        """
+        V8.7 FROZEN DETECTION:
+        Returns True if thread count < 80 for more than 3 minutes (180s).
+        Healthy clone must have Threads > 100.
+        """
+        history = MonitorEngine._thread_history.get(clone_name, [])
+        if not history:
+            return False
+        
+        now = time.time()
+        
+        # Check if thread count has been below 80 for 3+ minutes
+        first_low = None
+        for ts, count in reversed(history):
+            if count < 0:  # Skip error readings
+                continue
+            if count >= 80:  # Not frozen anymore
+                break
+            first_low = ts
+        
+        if first_low and (now - first_low) >= 180:
+            return True
+        
+        return False
+    
+    @staticmethod
+    async def kill_ghost_process(pid: str, clone_name: str) -> bool:
+        """
+        V8.7: Kill a ghost process using kill -9.
+        Returns True if successfully killed.
+        """
+        if not pid:
+            return False
+        
+        try:
+            logger.critical(f"👻 V8.7 GHOST KILL: Killing {clone_name} (PID {pid}) — stuck at 1 thread for 5min+")
+            ret, _, _ = await run_bash(f"su -c 'kill -9 {pid}'")
+            
+            # Verify death
+            await asyncio.sleep(1)
+            check_ret, _, _ = await run_bash(f"su -c 'kill -0 {pid} 2>/dev/null && echo ALIVE || echo DEAD'")
+            success = "DEAD" in check_ret
+            
+            if success:
+                logger.info(f"👻 V8.7 GHOST KILL: {clone_name} terminated successfully")
+            else:
+                logger.error(f"👻 V8.7 GHOST KILL: {clone_name} may still be alive!")
+            
+            return success
+        except Exception as e:
+            logger.error(f"👻 V8.7 GHOST KILL error: {e}")
+            return False
     
     @staticmethod
     async def get_clone_pid(clone_name: str) -> str:

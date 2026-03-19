@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V8.5 Remote Command Center & Kernel Sight
+# ui_manager.py — Project Aegis V8.7 Kernel Master
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V8.5*\n"
+            "💎 *AEGIS OVERLORD V8.7*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[🎯 REMOTE CONSOLE]`\n"
+            f"⚡️ SYSTEM : `[🧠 KERNEL MASTER]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -41,7 +41,7 @@ class UIManager:
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
         return (
-            "💎 *AEGIS V8.5 — REMOTE COMMAND CENTER*\n"
+            "💎 *AEGIS V8.7 — KERNEL MASTER*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
             f"🎯 REMOTE : `[EXEC & UPDATE ENABLED]`\n"
@@ -52,7 +52,7 @@ class UIManager:
             f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "🎯 _Remote Exec, Hot-Reload, Kernel Sight._"
+            "🧠 _Hard-coded /proc. Absolute kernel sight._"
         )
 
     @staticmethod
@@ -83,7 +83,7 @@ class UIManager:
         state_map:  {clone_name: CloneState (str value)}
         uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *AEGIS OVERLORD V8.5 REMOTE CONSOLE*\n"
+        msg = "💎 *AEGIS OVERLORD V8.7 KERNEL MASTER*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
@@ -112,7 +112,14 @@ class UIManager:
 
             # Thread info (from status_map, optional)
             thr_info = state_map.get(f"{name}:threads", "")
-            thr_line = f"🧵 Threads: `{thr_info}`" if thr_info else "🧵 Threads: `—`"
+            thr_status = state_map.get(f"{name}:thread_status", "")
+            if thr_info:
+                if thr_info == "1" or thr_status == "idle":
+                    thr_line = f"🧵 Threads: `1` [IDLE/LOADING]"
+                else:
+                    thr_line = f"🧵 Threads: `{thr_info}`"
+            else:
+                thr_line = "🧵 Threads: `—`"
 
             msg += (
                 f"[🎮 *{name.upper()}*]\n"
@@ -167,15 +174,15 @@ class UIManager:
     @staticmethod
     def get_help_text() -> str:
         return (
-            "🎯 *AEGIS V8.5 REMOTE COMMAND CENTER & KERNEL SIGHT*\n\n"
-            "• Remote Console: `/exec [command]` — Shell access via Telegram\n"
+            "🧠 *AEGIS V8.7 KERNEL MASTER — ROOT-LEVEL TELEMETRY*\n\n"
+            "• Hard-Coded Method: `su -c \"cat /proc/[PID]/status | grep Threads\"`\n"
+            "• Ghost Process: *1 thread for 5min = kill -9 + relaunch*\n"
+            "• Frozen Detection: *<80 threads for 3min = FROZEN*\n"
+            "• Healthy Threshold: *Threads > 100*\n"
+            "• Idle/Loading: *1 thread marked as [IDLE/LOADING]*\n"
+            "• Remote Console: `/exec [command]` — Emergency shell access\n"
             "• Hot Reload: `/update` — Git pull & auto-restart\n"
-            "• Auto-Boot: `~/.bashrc` auto-configured on startup\n"
-            "• Kernel Scanner: *Direct /proc/[PID]/status* reading\n"
-            "• Fallback: */proc/[PID]/task* directory counting\n"
-            "• Freeze Detection: *Threads < 50 for 5min* triggers restart\n"
             "• OOM Protection: *-1000 score* (IMMORTAL)\n"
-            "• Ghost Watch: *External monitor* auto-restarts bot\n"
             "• Daily Restart: *05:00* sequential maintenance\n\n"
-            "_V8.5: Full remote control. No Termux required._"
+            "_V8.7: We don't parse logs. We command the kernel._"
         )
