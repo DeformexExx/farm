@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-# monitor.py — Project Aegis V10.3 Monolithic Kernel Access
+# monitor.py — Project Aegis V10.6 Monolithic Kernel Access
 import os
 import re
 import logging
@@ -8,29 +7,40 @@ import asyncio
 from typing import Optional, Dict, Tuple
 from bash_utils import run_bash
 
-logger = logging.getLogger("MonitorEngineV103")
+# Import global run_bash for V10.6 sync execution
+try:
+    from main import run_bash as run_bash_sync
+except ImportError:
+    # Fallback if being run or imported differently
+    def run_bash_sync(command):
+        import subprocess
+        safe_cmd = command.replace('"', '\\"')
+        full_cmd = f'su -c "{safe_cmd}"'
+        return subprocess.check_output(full_cmd, shell=True).decode().strip()
+
+logger = logging.getLogger("MonitorEngineV106")
 
 class MonitorEngine:
     
     # ═══════════════════════════════════════════════════════════════════════
-    # V10.3 MONOLITHIC KERNEL ACCESS — Hard-coded su -c "cat /proc/[PID]/status | grep Threads"
+    # V10.6 MONOLITHIC KERNEL ACCESS — Hard-coded su -c "cat /proc/[PID]/status | grep Threads"
     # ═══════════════════════════════════════════════════════════════════════
     
     @staticmethod
-    async def get_thread_count_v103(pid: str) -> Tuple[int, str]:
+    async def get_thread_count_v106(pid: str) -> Tuple[int, str]:
         """
-        V10.3 PRIMARY: Monolithic kernel access — su -c "cat /proc/[PID]/status | grep Threads"
+        V10.6 PRIMARY: Monolithic kernel access — su -c "cat /proc/[PID]/status | grep Threads"
         Returns (thread_count, status). On failure: returns (0, "[ERR]") — NO FALLBACK.
         """
         if not pid:
             return 0, "[ERR]"
         
-        # V10.3: DIRECT KERNEL SIGHT — ONLY this method, no alternatives
+        # V10.6: DIRECT KERNEL SIGHT — ONLY this method, no alternatives
         try:
-            # Clean string parsing to avoid errors
+            # Clean string parsing to avoid errors. Uses synchronous global run_bash.
             cmd = f"cat /proc/{pid}/status | grep Threads"
-            ret, stdout, _ = await run_bash(f"su -c '{cmd}'")
-            if ret == 0 and stdout:
+            stdout = run_bash_sync(cmd)
+            if stdout and not stdout.startswith("[ERR]"):
                 # Parse "Threads: 159" → extract 159
                 match = re.search(r'Threads:\s*(\d+)', stdout)
                 if match:
@@ -41,15 +51,15 @@ class MonitorEngine:
                         return count, "active"
             return 0, "[ERR]"
         except Exception as e:
-            logger.debug(f"V10.3: Thread count failed for PID {pid}: {e}")
+            logger.debug(f"V10.6: Thread count failed for PID {pid}: {e}")
             return 0, "[ERR]"
     
     @staticmethod
     async def get_thread_count_kernel(pid: str) -> Tuple[int, str]:
         """
-        V10.3: All kernel thread counting routes through monolithic V10.3 method.
+        V10.6: All kernel thread counting routes through monolithic V10.6 method.
         """
-        return await MonitorEngine.get_thread_count_v103(pid)
+        return await MonitorEngine.get_thread_count_v106(pid)
     
     # ═══════════════════════════════════════════════════════════════════════
     # V7.1 THREAD TELEMETRY HISTORY — Tracks thread counts for freeze detection
