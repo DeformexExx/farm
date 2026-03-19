@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V10.4 Bootstrap & Scope Recovery
+# main.py — Project Aegis V10.5 Async Persistence Fix
 import os
 import sys
 import re
@@ -14,9 +14,9 @@ from typing import Optional, Dict, Tuple
 from datetime import datetime, timedelta
 
 # ═══════════════════════════════════════════════════════════════════════════
-# V10.4: BOOTSTRAP CONSTANTS — Mandatory Top-Level Definition
+# V10.5: BOOTSTRAP CONSTANTS — Mandatory Top-Level Definition
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "10.4"
+VERSION = "10.5"
 
 if len(sys.argv) < 2:
     print("❌ Usage: python main.py <DEVICE_ID>")
@@ -28,11 +28,11 @@ FARM_DIR  = _bot_dir
 BOOT_LOG  = os.path.join(FARM_DIR, "boot_log.txt")
 
 # ═══════════════════════════════════════════════════════════════════════════
-# V10.4: MONOLITHIC run_bash — Global Scope Mandate
+# V10.5: MONOLITHIC run_bash — Global Scope Mandate
 # ═══════════════════════════════════════════════════════════════════════════
 async def run_bash(command: str, use_su: bool = True) -> Tuple[int, str, str]:
     """
-    V10.4: Standalone global run_bash. Clean f-string syntax.
+    V10.5: Standalone global run_bash. Clean f-string syntax.
     Returns (returncode, stdout, stderr) — NEVER crashes the caller.
     """
     try:
@@ -76,7 +76,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV104")
+logger = logging.getLogger("AegisV105")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -1120,27 +1120,47 @@ class AegisBot:
             if n:
                 self.clone_states[n] = CloneState.STOPPED
 
-        # V10.2: AUTO-RECOVERY & PERSISTENCE (OOM -1000)
-        # Apply OOM immunity to self and all Roblox PIDs during initialization phase
-        asyncio.create_task(self._init_kernel_hardening())
+        # V10.5: ASYNC BOOT — OOM hardening moved to run()
+        # self._init_kernel_hardening() removed from here to prevent RuntimeWarning
 
     async def _init_kernel_hardening(self):
-        """V10.3: Recursive OOM -1000 application on startup."""
+        """V10.5: Recursive OOM -1000 application on startup."""
         try:
             pid = os.getpid()
             # 1. Harden bot self
             await run_bash(f"echo -1000 > /proc/{pid}/oom_score_adj", use_su=True)
             
+            # Verification read back
+            verify_ret, verify_out, _ = await run_bash(f"cat /proc/{pid}/oom_score_adj", use_su=True)
+            current_score = verify_out.strip() if verify_ret == 0 else "ERROR"
+
             # 2. Find and harden ALL Roblox PIDs recursively
             ret, stdout, _ = await run_bash("pgrep -f 'com.roblox'", use_su=True)
+            protected = 0
             if ret == 0 and stdout.strip():
                 pids = stdout.strip().split('\n')
                 for p in pids:
                     if p.strip():
                         await run_bash(f"echo -1000 > /proc/{p.strip()}/oom_score_adj", use_su=True)
-            logger.info("🔱 V10.3 KERNEL: Auto-hardening complete (Bot + Roblox)")
+                        protected += 1
+            
+            logger.info(f"🔱 V10.5 KERNEL: Auto-hardening complete (Bot: {current_score}, Roblox: {protected})")
+            
+            # Telegram verification
+            if self.application:
+                try:
+                    admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
+                    if admin_id:
+                        status_emoji = "✅" if current_score == "-1000" else "❌"
+                        await self.application.bot.send_message(
+                            admin_id, 
+                            f"🔱 *V10.5 ASYNC BOOT*\nOOM Immunity: `{current_score}` {status_emoji}\nRoblox Shielded: `{protected}`",
+                            parse_mode="Markdown"
+                        )
+                except Exception:
+                    pass
         except Exception as e:
-            logger.debug(f"V10.3 kernel hardening warning: {e}")
+            logger.debug(f"V10.5 kernel hardening warning: {e}")
 
     # ── State helpers ─────────────────────────────────────────────────────
     def set_state(self, name: str, state: CloneState):
@@ -1659,11 +1679,11 @@ class AegisBot:
             sys.exit(1)
         
         try:
-            # V10.2: SELF-HEALING AUTO-ROOT — System hardening on startup
-            logger.info(f"🔱 PROJECT AEGIS V10.2 KERNEL AUTO-ROOT — {DEVICE_ID}")
-            await self.system_harden()
+            # V10.5: SELF-HEALING ASYNC BOOT — Hardening must be awaited inside the loop
+            logger.info(f"🔱 PROJECT AEGIS V10.5 KERNEL AUTO-ROOT — {DEVICE_ID}")
+            await self._init_kernel_hardening()
             
-            # V10.0: BASHRC AUTO-INJECTOR — Check every run
+            # V10.5: BASHRC AUTO-INJECTOR — Check every run
             ensure_bashrc_injected()
             
             # 2. V8.0: Scan and adopt existing clones before starting new ones
@@ -1701,7 +1721,7 @@ class AegisBot:
             # 7. Auto-resume
             asyncio.create_task(self._auto_resume())
 
-            logger.info(f"🔱 PROJECT AEGIS V10.0 KERNEL AUTO-ROOT ACTIVE — {DEVICE_ID}")
+            logger.info(f"🔱 PROJECT AEGIS V10.5 KERNEL AUTO-ROOT ACTIVE — {DEVICE_ID}")
 
             # 8. Poll
             await app.updater.start_polling(drop_pending_updates=True)
