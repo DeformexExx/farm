@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V10.6 Global Scope Recovery
+# main.py — Project Aegis V10.7 Global Root Access
 import os
 import sys
 import re
@@ -14,21 +14,22 @@ from typing import Optional, Dict, Tuple
 from datetime import datetime, timedelta
 
 # ═══════════════════════════════════════════════════════════════════════════
-# V10.6: GLOBAL run_bash — Top-Level Scope
+# V10.7: GLOBAL run_bash — Top-Level Scope
 # ═══════════════════════════════════════════════════════════════════════════
 def run_bash(command):
-    """V10.6: Synchronous root execution for absolute scope visibility."""
+    """V10.7: Synchronous root execution for absolute scope visibility."""
     try:
+        # Use double quotes for su -c and escape internal quotes
         safe_cmd = command.replace('"', '\\"')
         full_cmd = f'su -c "{safe_cmd}"'
-        return subprocess.check_output(full_cmd, shell=True).decode().strip()
+        return subprocess.check_output(full_cmd, shell=True, stderr=subprocess.STDOUT).decode().strip()
     except Exception as e:
-        return f"[ERR] {e}"
+        return f"Error: {str(e)}"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# V10.6: BOOTSTRAP CONSTANTS
+# V10.7: BOOTSTRAP CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "10.6"
+VERSION = "10.7"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LOGGING SETUP
@@ -50,7 +51,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV106")
+logger = logging.getLogger("AegisV107")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -1097,7 +1098,7 @@ class AegisBot:
         # self._init_kernel_hardening() removed from here to prevent RuntimeWarning
 
     async def _init_kernel_hardening(self):
-        """V10.6: Synchronous OOM -1000 application on startup."""
+        """V10.7: Synchronous OOM -1000 application on startup."""
         try:
             pid = os.getpid()
             # 1. Harden bot self
@@ -1109,14 +1110,14 @@ class AegisBot:
             # 2. Find and harden ALL Roblox PIDs recursively
             stdout = run_bash("pgrep -f 'com.roblox'")
             protected = 0
-            if stdout and not stdout.startswith("[ERR]"):
+            if stdout and not stdout.startswith("Error:"):
                 pids = stdout.split('\n')
                 for p in pids:
                     if p.strip():
                         run_bash(f"echo -1000 > /proc/{p.strip()}/oom_score_adj")
                         protected += 1
             
-            logger.info(f"🔱 V10.6 KERNEL: Auto-hardening complete (Bot: {current_score}, Roblox: {protected})")
+            logger.info(f"🔱 V10.7 KERNEL: Auto-hardening complete (Bot: {current_score}, Roblox: {protected})")
             
             # Telegram verification
             if self.application:
@@ -1126,13 +1127,13 @@ class AegisBot:
                         status_emoji = "✅" if current_score == "-1000" else "❌"
                         await self.application.bot.send_message(
                             admin_id, 
-                            f"🔱 *V10.6 GLOBAL BOOT*\nOOM Immunity: `{current_score}` {status_emoji}\nRoblox Shielded: `{protected}`",
+                            f"🔱 *V10.7 GLOBAL BOOT*\nOOM Immunity: `{current_score}` {status_emoji}\nRoblox Shielded: `{protected}`",
                             parse_mode="Markdown"
                         )
                 except Exception:
                     pass
         except Exception as e:
-            logger.debug(f"V10.6 kernel hardening warning: {e}")
+            logger.debug(f"V10.7 kernel hardening warning: {e}")
 
     # ── State helpers ─────────────────────────────────────────────────────
     def set_state(self, name: str, state: CloneState):
@@ -1178,7 +1179,7 @@ class AegisBot:
 
     async def cmd_exec(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
-        V10.3 REMOTE CONSOLE: Execute shell command and return output.
+        V10.7 REMOTE CONSOLE: Execute shell command and return output.
         Usage: /exec [command]
         """
         if not await self._is_admin(update.effective_user.id):
@@ -1194,45 +1195,29 @@ class AegisBot:
             return
         
         command = " ".join(args)
-        logger.info(f"🔧 V10.3 REMOTE EXEC: {command}")
+        logger.info(f"🔧 V10.7 REMOTE EXEC: {command}")
         
         try:
-            # V10.3: Execute command via global run_bash (handles su -c automatically)
-            ret, stdout, stderr = await run_bash(command, use_su=True)
+            # V10.7: Execute command via global synchronous run_bash
+            output = run_bash(command)
             
-            # Build output
-            output = ""
-            if stdout:
-                output += f"📤 STDOUT:\n```\n{stdout}\n```\n"
-            if stderr:
-                output += f"⚠️ STDERR:\n```\n{stderr}\n```\n"
-            if not stdout and not stderr:
+            if not output:
                 output = "_(no output)_"
             
-            output += f"\n🔢 Exit code: `{ret}`"
-            
-            # Check length - if > 4000 chars, send as file
+            # Telegram message limit is 4096 characters
             if len(output) > 4000:
-                import tempfile
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                    f.write(f"Command: {command}\n")
-                    f.write(f"Exit code: {ret}\n\n")
-                    f.write(f"STDOUT:\n{stdout}\n\n")
-                    f.write(f"STDERR:\n{stderr}\n")
-                    temp_path = f.name
-                
-                with open(temp_path, 'rb') as f:
-                    await update.message.reply_document(
-                        document=f,
-                        caption=f"🔧 Exec output (too long for message)\nCmd: `{command[:50]}...`",
-                        parse_mode="Markdown"
-                    )
+                # Send as file if too long
+                temp_path = os.path.join(FARM_DIR, "exec_output.txt")
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    f.write(output)
+                with open(temp_path, "rb") as f:
+                    await update.message.reply_document(document=f, caption=f"📄 Output for: `{command}`")
                 os.remove(temp_path)
             else:
-                await update.message.reply_text(output, parse_mode="Markdown")
+                await update.message.reply_text(f"```\n{output}\n```", parse_mode="Markdown")
                 
         except Exception as e:
-            logger.error(f"V8.5 REMOTE EXEC error: {e}")
+            logger.error(f"V10.7 REMOTE EXEC error: {e}")
             await update.message.reply_text(f"❌ Exec error: `{e}`", parse_mode="Markdown")
 
     async def cmd_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1651,11 +1636,11 @@ class AegisBot:
             sys.exit(1)
         
         try:
-            # V10.6: SELF-HEALING ASYNC BOOT — Hardening must be awaited inside the loop
-            logger.info(f"🔱 PROJECT AEGIS V10.6 KERNEL AUTO-ROOT — {DEVICE_ID}")
+            # V10.7: SELF-HEALING ASYNC BOOT — Hardening must be awaited inside the loop
+            logger.info(f"🔱 PROJECT AEGIS V10.7 KERNEL AUTO-ROOT — {DEVICE_ID}")
             await self._init_kernel_hardening()
             
-            # V10.6: BASHRC AUTO-INJECTOR — Check every run
+            # V10.7: BASHRC AUTO-INJECTOR — Check every run
             ensure_bashrc_injected()
             
             # 2. V8.0: Scan and adopt existing clones before starting new ones
