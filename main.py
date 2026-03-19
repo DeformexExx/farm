@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V10.7 Global Root Access
+# main.py — Project Aegis V10.8 Final Structural Integrity
 import os
 import sys
 import re
@@ -14,10 +14,10 @@ from typing import Optional, Dict, Tuple
 from datetime import datetime, timedelta
 
 # ═══════════════════════════════════════════════════════════════════════════
-# V10.7: GLOBAL run_bash — Top-Level Scope
+# V10.8: GLOBAL CORE FUNCTIONS — Top-Level Scope
 # ═══════════════════════════════════════════════════════════════════════════
 def run_bash(command):
-    """V10.7: Synchronous root execution for absolute scope visibility."""
+    """V10.8: Synchronous root execution for absolute scope visibility."""
     try:
         # Use double quotes for su -c and escape internal quotes
         safe_cmd = command.replace('"', '\\"')
@@ -27,13 +27,10 @@ def run_bash(command):
         return f"Error: {str(e)}"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# V10.7: BOOTSTRAP CONSTANTS
+# V10.8: GLOBAL CONSTANTS — Mandatory Top-Level Definition
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "10.7"
+VERSION = "10.8"
 
-# ═══════════════════════════════════════════════════════════════════════════
-# LOGGING SETUP
-# ═══════════════════════════════════════════════════════════════════════════
 if len(sys.argv) < 2:
     print("❌ Usage: python main.py <DEVICE_ID>")
     sys.exit(1)
@@ -42,7 +39,11 @@ DEVICE_ID = sys.argv[1]
 _bot_dir = os.path.dirname(os.path.abspath(__file__))
 FARM_DIR  = _bot_dir
 BOOT_LOG  = os.path.join(FARM_DIR, "boot_log.txt")
+LOCK_FILE = os.path.join(FARM_DIR, f".aegis_{DEVICE_ID}.lock")
 
+# ═══════════════════════════════════════════════════════════════════════════
+# LOGGING SETUP
+# ═══════════════════════════════════════════════════════════════════════════
 logging.basicConfig(
     level=logging.INFO,
     format=f"%(asctime)s [{DEVICE_ID}/V{VERSION}] [%(levelname)s] %(message)s",
@@ -51,7 +52,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV107")
+logger = logging.getLogger("AegisV108")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -286,33 +287,33 @@ async def anchor_to_system():
                 if roblox_pid.strip():
                     run_bash(f"echo -1000 > /proc/{roblox_pid.strip()}/oom_score_adj")
                     protected += 1
-            logger.info(f"🔱 V10.6 KERNEL ACCESS: Applied OOM -1000 to {protected} Roblox PIDs")
+            logger.info(f"🔱 V10.8 KERNEL ACCESS: Applied OOM -1000 to {protected} Roblox PIDs")
         
         # Step 3: CPU/Nice priority
         run_bash(f"renice -n -20 -p {pid} 2>/dev/null || renice -n -15 -p {pid}")
         
-        logger.info("🔱 V10.6 KERNEL ACCESS: System hardening complete")
+        logger.info("🔱 V10.8 KERNEL ACCESS: System hardening complete")
 
-# V10.6: BASHRC AUTO-PATCH — Silent auto-launch persistence
+# V10.8: BASHRC AUTO-PATCH — Silent auto-launch persistence
 def ensure_bashrc_injected():
     """
-    V10.6: Silently ensure ~/.bashrc contains the auto-launch line.
+    V10.8: Silently ensure ~/.bashrc contains the auto-launch line.
     Ensures that after a reboot, opening Termux starts the bot automatically.
     """
     try:
         bashrc_path = os.path.expanduser("~/.bashrc")
         
-        # V10.6: Standard pgrep launch guard
+        # V10.8: Standard pgrep launch guard
         launch_cmd = f'if ! pgrep -f "python.*main.py.*{DEVICE_ID}" > /dev/null; then cd {_bot_dir} && nohup python main.py {DEVICE_ID} > /dev/null 2>&1 & fi'
         
-        marker = f"# Aegis V10.6 Auto-patch — {DEVICE_ID}"
+        marker = f"# Aegis V10.8 Auto-patch — {DEVICE_ID}"
         
         # Check if already injected
         if os.path.exists(bashrc_path):
             with open(bashrc_path, 'r') as f:
                 content = f.read()
             if marker in content:
-                logger.debug(f"🔱 V10.6 BASHRC: Persistence verified for {DEVICE_ID}")
+                logger.debug(f"🔱 V10.8 BASHRC: Persistence verified for {DEVICE_ID}")
                 return
         
         # Append to bashrc
@@ -320,10 +321,10 @@ def ensure_bashrc_injected():
             f.write(f"\n{marker}\n")
             f.write(f"{launch_cmd}\n")
         
-        logger.info(f"🔱 V10.6 BASHRC: Silent auto-patch applied for {DEVICE_ID}")
+        logger.info(f"🔱 V10.8 BASHRC: Silent auto-patch applied for {DEVICE_ID}")
         
     except Exception as e:
-        logger.warning(f"🔱 V10.6 BASHRC: Patch warning: {e}")
+        logger.warning(f"🔱 V10.8 BASHRC: Patch warning: {e}")
 
 async def protect_child_processes():
     """
@@ -1098,7 +1099,7 @@ class AegisBot:
         # self._init_kernel_hardening() removed from here to prevent RuntimeWarning
 
     async def _init_kernel_hardening(self):
-        """V10.7: Synchronous OOM -1000 application on startup."""
+        """V10.8: Recursive OOM -1000 application on startup."""
         try:
             pid = os.getpid()
             # 1. Harden bot self
@@ -1117,7 +1118,7 @@ class AegisBot:
                         run_bash(f"echo -1000 > /proc/{p.strip()}/oom_score_adj")
                         protected += 1
             
-            logger.info(f"🔱 V10.7 KERNEL: Auto-hardening complete (Bot: {current_score}, Roblox: {protected})")
+            logger.info(f"🔱 V10.8 KERNEL: Auto-hardening complete (Bot: {current_score}, Roblox: {protected})")
             
             # Telegram verification
             if self.application:
@@ -1127,13 +1128,13 @@ class AegisBot:
                         status_emoji = "✅" if current_score == "-1000" else "❌"
                         await self.application.bot.send_message(
                             admin_id, 
-                            f"🔱 *V10.7 GLOBAL BOOT*\nOOM Immunity: `{current_score}` {status_emoji}\nRoblox Shielded: `{protected}`",
+                            f"🔱 *V10.8 FINAL BOOT*\nOOM Immunity: `{current_score}` {status_emoji}\nRoblox Shielded: `{protected}`",
                             parse_mode="Markdown"
                         )
                 except Exception:
                     pass
         except Exception as e:
-            logger.debug(f"V10.7 kernel hardening warning: {e}")
+            logger.debug(f"V10.8 kernel hardening warning: {e}")
 
     # ── State helpers ─────────────────────────────────────────────────────
     def set_state(self, name: str, state: CloneState):
@@ -1636,11 +1637,11 @@ class AegisBot:
             sys.exit(1)
         
         try:
-            # V10.7: SELF-HEALING ASYNC BOOT — Hardening must be awaited inside the loop
-            logger.info(f"🔱 PROJECT AEGIS V10.7 KERNEL AUTO-ROOT — {DEVICE_ID}")
+            # V10.8: SELF-HEALING ASYNC BOOT — Hardening must be awaited inside the loop
+            logger.info(f"🔱 PROJECT AEGIS V10.8 KERNEL AUTO-ROOT — {DEVICE_ID}")
             await self._init_kernel_hardening()
             
-            # V10.7: BASHRC AUTO-INJECTOR — Check every run
+            # V10.8: BASHRC AUTO-INJECTOR — Check every run
             ensure_bashrc_injected()
             
             # 2. V8.0: Scan and adopt existing clones before starting new ones
@@ -1678,7 +1679,7 @@ class AegisBot:
             # 7. Auto-resume
             asyncio.create_task(self._auto_resume())
 
-            logger.info(f"🔱 PROJECT AEGIS V10.6 KERNEL AUTO-ROOT ACTIVE — {DEVICE_ID}")
+            logger.info(f"🔱 PROJECT AEGIS V10.8 KERNEL AUTO-ROOT ACTIVE — {DEVICE_ID}")
 
             # 8. Poll
             await app.updater.start_polling(drop_pending_updates=True)
