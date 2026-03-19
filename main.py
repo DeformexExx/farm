@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V10.8 Final Structural Integrity
+# main.py — Project Aegis V10.9 Final Structural Integrity
 import os
 import sys
 import re
@@ -586,9 +586,10 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
                 if state == CloneState.RUNNING:
                     pid = await InjectionEngine.get_clone_pid(name)
                     if pid:
-                        # V10.3: UI-Independent thread count via monolithic kernel access
-                        thread_count, status = MonitorEngine.get_thread_count_v103(pid)
-                        MonitorEngine.record_thread_history(name, thread_count)
+                        # V10.7: UI-Independent thread count via monolithic kernel access
+                        thread_count, status = await MonitorEngine.get_thread_count_v107(pid)
+                        if thread_count is not None:
+                            MonitorEngine.record_thread_history(name, thread_count)
                         
                         # Collect CPU usage
                         cpu = await MonitorEngine.get_clone_cpu_usage(name, pid)
@@ -598,7 +599,7 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
                         # V9.0: Emergency bypass if UI layer fails
                         if bot_instance.application is None or ui_failures >= 3:
                             # UI is down - attempt emergency API call
-                            if cycle % 30 == 0:  # Every 5 minutes during emergency
+                            if cycle % 30 == 0 and thread_count is not None:  # Every 5 minutes during emergency
                                 await _emergency_telemetry_alert(bot_instance, name, thread_count, status)
                         
                         # Log every 6 cycles (1 minute)
@@ -883,9 +884,15 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
 
                 # ── V7.2: 600-second immunity window ────────────────────
                 start_time = bot_instance.clone_start_time.get(name, 0)
-                immunity_remaining = 600 - (now - start_time)
+                uptime = now - start_time
+                immunity_remaining = 600 - uptime
                 if immunity_remaining > 0:
                     logger.debug(f"⚓ ANCHOR: Watchdog [{name}] IMMUNITY WINDOW ({int(immunity_remaining)}s remaining) — skipped")
+                    continue
+
+                # ── V10.9: 60-second WARM-UP specifically for thread counting ────
+                if uptime < 60:
+                    logger.debug(f"⚓ ANCHOR: Watchdog [{name}] WARM-UP (0-threads ignored for {int(60-uptime)}s)")
                     continue
 
                 # ── Get status (dual verification) ────────────────────────

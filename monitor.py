@@ -14,15 +14,16 @@ class MonitorEngine:
     # ═══════════════════════════════════════════════════════════════════════
     # V10.7 MONOLITHIC KERNEL ACCESS — Hard-coded su -c "cat /proc/[PID]/status | grep Threads"
     # ═══════════════════════════════════════════════════════════════════════
+    _pid_cache: Dict[str, str] = {}
     
     @staticmethod
-    async def get_thread_count_v107(pid: str) -> Tuple[int, str]:
+    async def get_thread_count_v107(pid: str) -> Tuple[Optional[int], str]:
         """
         V10.7 PRIMARY: Monolithic kernel access — su -c "cat /proc/[PID]/status | grep Threads"
-        Returns (thread_count, status). On failure: returns (0, "[ERR]") — NO FALLBACK.
+        Returns (thread_count, status). On failure: returns (None, "[ERR]") — NO FALLBACK.
         """
         if not pid:
-            return 0, "[ERR]"
+            return None, "[ERR]"
         
         # V10.7: DIRECT KERNEL SIGHT — ONLY this method, no alternatives
         try:
@@ -38,7 +39,7 @@ class MonitorEngine:
                         return count, "idle"  # 1 thread = IDLE/LOADING
                     elif count > 1:
                         return count, "active"
-            return 0, "[ERR]"
+            return None, "[ERR]"
         except Exception as e:
             logger.debug(f"V10.7: Thread count failed for PID {pid}: {e}")
             return 0, "[ERR]"
@@ -224,7 +225,7 @@ class MonitorEngine:
                     break
                 first_low = ts
             
-            if first_low and (now - first_low) >= 300:
+            if first_low is not None and (now - first_low) >= 300:
                 return True
         
         return False
@@ -276,7 +277,7 @@ class MonitorEngine:
                 break
             first_one_thread = ts
         
-        if first_one_thread and (now - first_one_thread) >= 300:
+        if first_one_thread is not None and (now - first_one_thread) >= 300:
             return True
         
         return False
@@ -303,7 +304,7 @@ class MonitorEngine:
                 break
             first_low = ts
         
-        if first_low and (now - first_low) >= 180:
+        if first_low is not None and (now - first_low) >= 180:
             return True
         
         return False
@@ -420,8 +421,9 @@ class MonitorEngine:
                 # V8.2: Use kernel scanner for thread count
                 thread_count, source = await MonitorEngine.get_thread_count_kernel(pid)
                 
-                # Record for freeze detection
-                MonitorEngine.record_thread_history(clone_name, thread_count)
+                # Record for freeze detection (Only if valid)
+                if thread_count is not None:
+                    MonitorEngine.record_thread_history(clone_name, thread_count)
                 
                 # Get RSS memory
                 cmd_stats = f"su -c 'cat /proc/{pid}/status | grep -E \"VmRSS\"'"
@@ -441,7 +443,7 @@ class MonitorEngine:
                     MonitorEngine.record_cpu_history(clone_name, cpu)
                 
                 # V8.2: Show real thread count, never show [SCANNING...]
-                if thread_count < 0:
+                if thread_count is None or thread_count < 0:
                     threads_str = "N/A"  # Kernel read failed
                 else:
                     threads_str = str(thread_count)
