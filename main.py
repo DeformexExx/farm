@@ -588,8 +588,9 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
                     if pid:
                         # V10.7: UI-Independent thread count via monolithic kernel access
                         thread_count, status = await MonitorEngine.get_thread_count_v107(pid)
-                        if thread_count is not None:
-                            MonitorEngine.record_thread_history(name, thread_count)
+                        
+                        # V10.9: Record status even if None to allow UI [OFFLINE] state
+                        MonitorEngine.record_thread_history(name, thread_count if thread_count is not None else -1)
                         
                         # Collect CPU usage
                         cpu = await MonitorEngine.get_clone_cpu_usage(name, pid)
@@ -890,9 +891,9 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                     logger.debug(f"⚓ ANCHOR: Watchdog [{name}] IMMUNITY WINDOW ({int(immunity_remaining)}s remaining) — skipped")
                     continue
 
-                # ── V10.9: 60-second WARM-UP specifically for thread counting ────
-                if uptime < 60:
-                    logger.debug(f"⚓ ANCHOR: Watchdog [{name}] WARM-UP (0-threads ignored for {int(60-uptime)}s)")
+                # ── V10.9: 120-second WARM-UP specifically for thread counting ────
+                if uptime < 120:
+                    logger.debug(f"⚓ ANCHOR: Watchdog [{name}] WARM-UP (0-threads ignored for {int(120-uptime)}s)")
                     continue
 
                 # ── Get status (dual verification) ────────────────────────
@@ -1254,12 +1255,15 @@ class AegisBot:
                 history = MonitorEngine._thread_history.get(name, [])
                 if history:
                     last_count = history[-1][1]
-                    if last_count >= 0:
+                    if last_count > 0:
                         state_map[f"{name}:threads"] = str(last_count)
                         if last_count == 1:
                             state_map[f"{name}:thread_status"] = "idle"
                         else:
                             state_map[f"{name}:thread_status"] = "active"
+                    elif last_count == -1:
+                        # V10.9: Explicit [OFFLINE] state
+                        state_map[f"{name}:threads"] = "[OFFLINE]"
         
         return UIManager.format_clones_hub(self.config.clones_data, state_map, self.running_since)
 

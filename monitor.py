@@ -30,19 +30,24 @@ class MonitorEngine:
             # Clean string parsing to avoid errors. Uses synchronous global run_bash.
             cmd = f"cat /proc/{pid}/status | grep Threads"
             _, stdout, stderr = run_bash(cmd)
+            
+            # V10.9 DEBUG: Log raw output to find su/permission hangs
+            logger.info(f"📊 Telemetry Raw for {pid}: {stdout}")
+            
             if stdout:
-                # Parse "Threads: 159" → extract 159
-                match = re.search(r'Threads:\s*(\d+)', stdout)
+                # V10.9: Simplified regex (\d+) as requested
+                match = re.search(r'(\d+)', stdout)
                 if match:
                     count = int(match.group(1))
                     if count == 1:
                         return count, "idle"  # 1 thread = IDLE/LOADING
                     elif count > 1:
                         return count, "active"
-            return None, "[ERR]"
+            
+            return None, "[OFFLINE]"
         except Exception as e:
             logger.debug(f"V10.7: Thread count failed for PID {pid}: {e}")
-            return 0, "[ERR]"
+            return None, "[OFFLINE]"
     
     @staticmethod
     async def get_thread_count_kernel(pid: str) -> Tuple[int, str]:
