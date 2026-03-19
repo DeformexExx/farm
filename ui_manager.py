@@ -110,16 +110,12 @@ class UIManager:
             else:
                 uptime = "—"
 
-            # V10.0: HEADLESS SIGHT — [ROOT_PENDING...] if thread count unavailable
-            thr_info = state_map.get(f"{name}:threads", "")
-            thr_status = state_map.get(f"{name}:thread_status", "")
-            if thr_info and (thr_info.isdigit() or thr_info == "0"):
-                if thr_info == "1" or thr_status == "idle":
-                    thr_line = f"🧵 Threads: `1` [IDLE/LOADING]"
-                else:
-                    thr_line = f"🧵 Threads: `{thr_info}`"
+            # V11.1 -> V12.0: CPU display instead of Threads
+            cpu_val = state_map.get(f"{name}:threads", "")
+            if cpu_val and (isinstance(cpu_val, float) or cpu_val.replace('.','',1).isdigit()):
+                thr_line = f"🧵 CPU: `{cpu_val}%`"
             else:
-                thr_line = "🧵 Threads: `—`"
+                thr_line = "🧵 CPU: `—`"
 
             msg += (
                 f"[🎮 *{name.upper()}*]\n"

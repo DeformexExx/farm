@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V11.0 The Kernel Hunter
+# main.py — Project Aegis V12.0 Top-Monitor Update
 import os
 import sys
 import re
@@ -31,7 +31,7 @@ def run_bash(cmd: str) -> tuple[int, str, str]:
 # ═══════════════════════════════════════════════════════════════════════════
 # V10.9: GLOBAL CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "11.0"
+VERSION = "12.0"
 
 if len(sys.argv) < 2:
     print("❌ Usage: python main.py <DEVICE_ID>")
@@ -586,24 +586,45 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
         cycle += 1
         
         try:
+            # V12.0: Get ALL Roblox data at once from Top-Monitor
+            top_data = await MonitorEngine.get_top_telemetry()
+            
+            # Record for PIDs found in top
+            found_suffixes = set(top_data.keys())
+            
             for name, state in list(bot_instance.clone_states.items()):
                 if state == CloneState.RUNNING:
-                    pid = await InjectionEngine.get_clone_pid(name)
-                    if pid:
-                        # V10.7: UI-Independent thread count via monolithic kernel access
-                        thread_count, status = await MonitorEngine.get_thread_count_v107(pid)
+                    # Find suffix (e.g. 'cliene') from name
+                    # assuming name is the suffix or contains 'clien'
+                    suffix = name.lower() 
+                    
+                    if suffix in top_data:
+                        data = top_data[suffix]
+                        pid = data["pid"]
+                        cpu = data["cpu"]
                         
-                        # V10.9: Record status even if None to allow UI [OFFLINE] state
-                        MonitorEngine.record_thread_history(name, thread_count if thread_count is not None else -1)
-                        
-                        # V11.0: OOM IMMUNITY HUNTER
-                        # Apply -1000 to all discovered Roblox PIDs
+                        # V12.0: IMMEDIATE HARDENING
                         run_bash(f"su -c 'echo -1000 > /proc/{pid}/oom_score_adj'")
                         
-                        # Collect CPU usage
-                        cpu = await MonitorEngine.get_clone_cpu_usage(name, pid)
-                        if cpu >= 0:
-                            MonitorEngine.record_cpu_history(name, cpu)
+                        # Record CPU for UI (Threads column is now CPU)
+                        MonitorEngine.record_thread_history(name, cpu)
+                        MonitorEngine.record_cpu_history(name, cpu)
+                        
+                        # V12.0 WATCHDOG: Track 0.0% CPU duration
+                        if cpu > 0.1:
+                            MonitorEngine._cpu_zero_timers[name] = 0
+                        else:
+                            # Increment timer if CPU is 0.0 (using 0.1 threshold for jitter)
+                            MonitorEngine._cpu_zero_timers[name] = MonitorEngine._cpu_zero_timers.get(name, 0) + 10 # 10s cycle
+                            
+                            # V12.0: Check for 5-minute freeze (300 seconds)
+                            if MonitorEngine._cpu_zero_timers[name] >= 300:
+                                logger.warning(f"⚠️ V12.0: {name} frozen at 0.0% CPU for 5 mins. Restarting...")
+                                await bot_instance.restart_clone(name)
+                                MonitorEngine._cpu_zero_timers[name] = 0
+                    else:
+                        # Process not in top -> Offline?
+                        MonitorEngine.record_thread_history(name, -1) # -1 is offline
                         
                         # V9.0: Emergency bypass if UI layer fails
                         if bot_instance.application is None or ui_failures >= 3:

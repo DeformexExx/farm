@@ -15,45 +15,46 @@ class MonitorEngine:
     # V10.7 MONOLITHIC KERNEL ACCESS — Hard-coded su -c "cat /proc/[PID]/status | grep Threads"
     # ═══════════════════════════════════════════════════════════════════════
     _pid_cache: Dict[str, str] = {}
+    _cpu_zero_timers: Dict[str, float] = {}  # V12.0: Tracks 0.0% CPU for watchdog
+    
+    @staticmethod
+    async def get_top_telemetry() -> Dict[str, Dict]:
+        """
+        V12.0: THE TOP-MONITOR — Returns ALL Roblox telemetry at once via top.
+        Output format: {clone_name: {"pid": str, "cpu": float}}
+        """
+        results = {}
+        # New Directive: su -c "top -n 1 -b | grep -i 'com.roblox.clien'"
+        cmd = "su -c \"top -n 1 -b | grep -i 'com.roblox.clien'\""
+        ret, stdout, _ = run_bash(cmd)
+        
+        if ret == 0 and stdout:
+            lines = stdout.strip().split('\n')
+            for line in lines:
+                parts = line.split()
+                if len(parts) >= 9:
+                    try:
+                        pid = parts[0]
+                        cpu = float(parts[8]) # 9th column (0-indexed)
+                        
+                        # Find the suffix in the package name (e.g. com.roblox.cliene)
+                        match = re.search(r'com\.roblox\.(clien[a-z])', line.lower())
+                        if match:
+                            suffix = match.group(1)
+                            results[suffix] = {"pid": pid, "cpu": cpu}
+                    except (IndexError, ValueError):
+                        continue
+        return results
     
     @staticmethod
     async def get_thread_count_v107(pid: str) -> Tuple[Optional[int], str]:
-        """
-        V10.7 PRIMARY: Monolithic kernel access — su -c "cat /proc/[PID]/status | grep Threads"
-        Returns (thread_count, status). On failure: returns (None, "[ERR]") — NO FALLBACK.
-        """
-        if not pid:
-            return None, "[ERR]"
-        
-        # V11.0: THE KERNEL HUNTER — Direct task enumeration
-        try:
-            # User Directive: su -c "ls /proc/{pid}/task | wc -l"
-            cmd = f"su -c 'ls /proc/{pid}/task 2>/dev/null | wc -l'"
-            _, stdout, stderr = run_bash(cmd)
-            
-            # V11.0 DEBUG: Log raw output
-            logger.info(f"🛰 Hunter Threads for {pid}: {stdout}")
-            
-            if stdout and stdout.strip().isdigit():
-                count = int(stdout.strip())
-                if count == 1:
-                    return count, "idle"
-                elif count > 1:
-                    return count, "active"
-                elif count == 0:
-                    return 0, "offline"
-            
-            return None, "offline"
-        except Exception as e:
-            logger.debug(f"V11.0: Hunter thread count failed for PID {pid}: {e}")
-            return None, "offline"
+        """V12.0: Obsolete method — Redirected to none."""
+        return None, "offline"
     
     @staticmethod
     async def get_thread_count_kernel(pid: str) -> Tuple[int, str]:
-        """
-        V10.7: All kernel thread counting routes through monolithic V10.7 method.
-        """
-        return await MonitorEngine.get_thread_count_v107(pid)
+        """V12.0: Obsolete method — Redirected to none."""
+        return 0, "offline"
     
     # ═══════════════════════════════════════════════════════════════════════
     # V7.1 THREAD TELEMETRY HISTORY — Tracks thread counts for freeze detection
