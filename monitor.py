@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# monitor.py — Project Aegis V10.2 Monolithic Kernel Access
+# monitor.py — Project Aegis V10.3 Monolithic Kernel Access
 import os
 import re
 import logging
@@ -8,24 +8,24 @@ import asyncio
 from typing import Optional, Dict, Tuple
 from bash_utils import run_bash
 
-logger = logging.getLogger("MonitorEngineV102")
+logger = logging.getLogger("MonitorEngineV103")
 
 class MonitorEngine:
     
     # ═══════════════════════════════════════════════════════════════════════
-    # V10.2 MONOLITHIC KERNEL ACCESS — Hard-coded su -c "cat /proc/[PID]/status | grep Threads"
+    # V10.3 MONOLITHIC KERNEL ACCESS — Hard-coded su -c "cat /proc/[PID]/status | grep Threads"
     # ═══════════════════════════════════════════════════════════════════════
     
     @staticmethod
-    async def get_thread_count_v102(pid: str) -> Tuple[int, str]:
+    async def get_thread_count_v103(pid: str) -> Tuple[int, str]:
         """
-        V10.2 PRIMARY: Monolithic kernel access — su -c "cat /proc/[PID]/status | grep Threads"
+        V10.3 PRIMARY: Monolithic kernel access — su -c "cat /proc/[PID]/status | grep Threads"
         Returns (thread_count, status). On failure: returns (0, "[ERR]") — NO FALLBACK.
         """
         if not pid:
             return 0, "[ERR]"
         
-        # V10.2: DIRECT KERNEL SIGHT — ONLY this method, no alternatives
+        # V10.3: DIRECT KERNEL SIGHT — ONLY this method, no alternatives
         try:
             # Clean string parsing to avoid errors
             cmd = f"cat /proc/{pid}/status | grep Threads"
@@ -41,15 +41,15 @@ class MonitorEngine:
                         return count, "active"
             return 0, "[ERR]"
         except Exception as e:
-            logger.debug(f"V10.2: Thread count failed for PID {pid}: {e}")
+            logger.debug(f"V10.3: Thread count failed for PID {pid}: {e}")
             return 0, "[ERR]"
     
     @staticmethod
     async def get_thread_count_kernel(pid: str) -> Tuple[int, str]:
         """
-        V10.2: All kernel thread counting routes through monolithic V10.2 method.
+        V10.3: All kernel thread counting routes through monolithic V10.3 method.
         """
-        return await MonitorEngine.get_thread_count_v102(pid)
+        return await MonitorEngine.get_thread_count_v103(pid)
     
     # ═══════════════════════════════════════════════════════════════════════
     # V7.1 THREAD TELEMETRY HISTORY — Tracks thread counts for freeze detection
