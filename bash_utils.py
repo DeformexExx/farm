@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-import asyncio
 import logging
+import subprocess
 
 logger = logging.getLogger("BashUtils")
 
-async def run_bash(cmd: str) -> tuple[int, str, str]:
-    """Выполняет bash команду и возвращает (код_возврата, stdout, stderr)"""
+def run_bash(cmd: str) -> tuple[int, str, str]:
+    """Выполняет bash команду синхронно и возвращает (код_возврата, stdout, stderr)"""
     try:
-        process = await asyncio.create_subprocess_shell(
-            cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        # Use subprocess.run for synchronous execution as requested in V10.9
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=30
         )
-        stdout, stderr = await process.communicate()
-        return process.returncode, stdout.decode().strip(), stderr.decode().strip()
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
     except Exception as e:
         logger.error(f"Bash Execution Error: {e} | CMD: {cmd}")
         return -1, "", str(e)

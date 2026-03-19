@@ -14,22 +14,24 @@ from typing import Optional, Dict, Tuple
 from datetime import datetime, timedelta
 
 # ═══════════════════════════════════════════════════════════════════════════
-# V10.8: GLOBAL CORE FUNCTIONS — Top-Level Scope
+# V10.9: SYNC/ASYNC HARMONY — Project Aegis Final Core
 # ═══════════════════════════════════════════════════════════════════════════
-def run_bash(command):
-    """V10.8: Synchronous root execution for absolute scope visibility."""
+def run_bash(cmd: str) -> tuple[int, str, str]:
+    """V10.9: Synchronous root execution for absolute stability."""
+    import subprocess
     try:
-        # Use double quotes for su -c and escape internal quotes
-        safe_cmd = command.replace('"', '\\"')
-        full_cmd = f'su -c "{safe_cmd}"'
-        return subprocess.check_output(full_cmd, shell=True, stderr=subprocess.STDOUT).decode().strip()
+        # User Directive: run_bash is strictly SYNC
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=45
+        )
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
     except Exception as e:
-        return f"Error: {str(e)}"
+        return -1, "", str(e)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# V10.8: GLOBAL CONSTANTS — Mandatory Top-Level Definition
+# V10.9: GLOBAL CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "10.8"
+VERSION = "10.9"
 
 if len(sys.argv) < 2:
     print("❌ Usage: python main.py <DEVICE_ID>")
@@ -52,7 +54,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV108")
+logger = logging.getLogger("AegisV109")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -145,9 +147,9 @@ su -c "nohup python main.py {DEVICE_ID} > /dev/null 2>&1 &"
                     temp_path = f.name
                 
                 # Move to service.d with proper permissions
-                run_bash_sync(f"su -c 'cp {temp_path} {service_script}'")
-                run_bash_sync(f"su -c 'chmod 755 {service_script}'")
-                run_bash_sync(f"su -c 'chown root:root {service_script}'")
+                run_bash(f"su -c 'cp {temp_path} {service_script}'")
+                run_bash(f"su -c 'chmod 755 {service_script}'")
+                run_bash(f"su -c 'chown root:root {service_script}'")
                 os.remove(temp_path)
                 
                 logger.info(f"🔱 V9.0 AUTOBOOT: Installed to {service_script}")
@@ -175,15 +177,7 @@ su -c "nohup python main.py {DEVICE_ID} > /dev/null 2>&1 &"
     except Exception as e:
         logger.warning(f"🔱 V9.0 AUTOBOOT: Setup warning: {e}")
 
-# Synchronous wrapper for bash commands in non-async context
-def run_bash_sync(cmd: str) -> tuple:
-    """Synchronous wrapper for bash commands."""
-    import subprocess
-    try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
-        return result.returncode, result.stdout, result.stderr
-    except Exception as e:
-        return -1, "", str(e)
+# Removed duplicate run_bash_sync (V10.9 Harmony)
 
 # ── SIGNAL HANDLERS ───────────────────────────────────────────────────────
 def _signal_handler(signum, frame):
@@ -203,164 +197,101 @@ except Exception as e:
     logger.warning(f"⚓ ANCHOR: Signal handler setup failed: {e}")
 
 # ── SYSTEM PRIORITY & OOM ─────────────────────────────────────────────────
-async def anchor_to_system():
+def anchor_to_system():
     """
-    V9.0 SYSTEM IMMORTAL: Kernel-level OOM immunity for bot and all children.
+    V10.9 SYSTEM IMMORTAL: Kernel-level OOM immunity for bot and all children.
     Writes -1000 to oom_score_adj to become "Unkillable" by Android LMK.
+    """
+    try:
+        pid = os.getpid()
+        logger.info(f"🔱 V10.9 SYSTEM IMMORTAL: Anchoring PID {pid} to kernel...")
+        
+        # recursive protection
+        protect_child_processes()
+        
+        # Max CPU Priority
+        run_bash(f"su -c 'renice -n -20 -p {pid}'")
+        run_bash(f"su -c 'taskset -cp 0 {pid}' 2>/dev/null")
+        run_bash(f"su -c 'ionice -c 1 -n 0 -p {pid}' 2>/dev/null")
+        
+        logger.info("🔱 V10.9 SYSTEM IMMORTAL: Anchoring complete")
+        system_harden_v109()
+    except Exception as e:
+        logger.error(f"🔱 V10.9 ANCHOR ERROR: {e}")
+
+def system_harden_v109():
+    """
+    V10.9 MONOLITHIC KERNEL ACCESS: Auto OOM -1000 for bot + ALL Roblox PIDs.
     """
     pid = os.getpid()
     oom_path = f"/proc/{pid}/oom_score_adj"
     
-    logger.info(f"🔱 V9.0 SYSTEM IMMORTAL: Anchoring PID {pid} to kernel...")
+    logger.info(f"🔱 V10.9 KERNEL ACCESS: Hardening PID {pid}...")
     
-    # V9.0: CRITICAL - Set OOM score to -1000 (IMMORTAL)
-    try:
-        ret, _, _ = await run_bash(f"su -c 'echo -1000 > {oom_path}'")
-        if ret == 0:
-            logger.info("� V9.0: OOM score set to -1000 — BOT IS NOW UNKILLABLE")
-        else:
-            logger.critical("� V9.0: FAILED to set OOM score — bot may be killed by LMK!")
-    except Exception as e:
-        logger.critical(f"� V9.0: OOM immunity error: {e}")
+    # Step 1: Apply OOM -1000 to bot itself
+    run_bash(f"su -c 'echo -1000 > {oom_path}'")
     
-    # V9.0: CRITICAL - Protect ALL child processes recursively
-    await protect_child_processes()
+    # Step 2: Auto-find and harden ALL Roblox PIDs
+    _, stdout, _ = run_bash("pgrep -f 'com.roblox'")
+    protected = 0
+    if stdout:
+        pids = stdout.split('\n')
+        for roblox_pid in pids:
+            if roblox_pid.strip():
+                run_bash(f"su -c 'echo -1000 > /proc/{roblox_pid.strip()}/oom_score_adj'")
+                protected += 1
+        logger.info(f"🔱 V10.9 KERNEL ACCESS: Applied OOM -1000 to {protected} Roblox PIDs")
     
-    # V9.0: Maximum CPU Priority (renice -20 = real-time priority)
-    try:
-        ret, _, _ = await run_bash(f"su -c 'renice -n -20 -p {pid}'")
-        if ret == 0:
-            logger.info("� V9.0: CPU priority at MAXIMUM (renice -20)")
-        else:
-            await run_bash(f"su -c 'renice -n -15 -p {pid}'")
-            logger.info("� V9.0: CPU priority at HIGH (renice -15)")
-    except Exception as e:
-        logger.warning(f"� V9.0: renice error: {e}")
-    
-    # V9.0: CPU Isolation (dedicate core 0 to bot)
-    try:
-        ret, _, _ = await run_bash(f"su -c 'taskset -cp 0 {pid}' 2>/dev/null")
-        if ret == 0:
-            logger.info("� V9.0: CPU isolation on core 0")
-    except Exception:
-        pass
-    
-    # V9.0: Set I/O priority to real-time
-    try:
-        await run_bash(f"su -c 'ionice -c 1 -n 0 -p {pid}' 2>/dev/null")
-        logger.info("� V9.0: I/O priority set to REAL-TIME")
-    except Exception:
-        pass
-    
-    logger.info("🔱 V9.0 SYSTEM IMMORTAL: Anchoring complete — Bot integrated into Core System Layer")
+    run_bash(f"su -c 'renice -n -20 -p {pid} 2>/dev/null || renice -n -15 -p {pid}'")
+    logger.info("🔱 V10.9 KERNEL ACCESS: System hardening complete")
 
-    await system_harden()
-
-    async def system_harden(self):
-        """
-        V10.6 MONOLITHIC KERNEL ACCESS: Auto OOM -1000 for bot + ALL Roblox PIDs.
-        Zero-touch automation — runs on every startup without user input.
-        """
-        pid = os.getpid()
-        oom_path = f"/proc/{pid}/oom_score_adj"
-        
-        logger.info(f"🔱 V10.6 KERNEL ACCESS: Hardening PID {pid}...")
-        
-        # Step 1: Apply OOM -1000 to bot itself
-        run_bash(f"echo -1000 > {oom_path}")
-        
-        # Verification
-        current_score = run_bash(f"cat {oom_path}")
-        
-        msg = f"🔱 V10.6 KERNEL ACCESS: Bot OOM score is {current_score}"
-        if current_score == "-1000":
-            logger.info(f"{msg} — UNKILLABLE ✅")
-        else:
-            logger.critical(f"{msg} — CRITICAL! ❌")
-
-        # Step 2: Auto-find and harden ALL Roblox PIDs
-        stdout = run_bash("pgrep -f 'com.roblox'")
-        protected = 0
-        if stdout and not stdout.startswith("[ERR]"):
-            pids = stdout.split('\n')
-            for roblox_pid in pids:
-                if roblox_pid.strip():
-                    run_bash(f"echo -1000 > /proc/{roblox_pid.strip()}/oom_score_adj")
-                    protected += 1
-            logger.info(f"🔱 V10.8 KERNEL ACCESS: Applied OOM -1000 to {protected} Roblox PIDs")
-        
-        # Step 3: CPU/Nice priority
-        run_bash(f"renice -n -20 -p {pid} 2>/dev/null || renice -n -15 -p {pid}")
-        
-        logger.info("🔱 V10.8 KERNEL ACCESS: System hardening complete")
-
-# V10.8: BASHRC AUTO-PATCH — Silent auto-launch persistence
+# V10.9: BASHRC AUTO-PATCH — Silent auto-launch persistence
 def ensure_bashrc_injected():
     """
-    V10.8: Silently ensure ~/.bashrc contains the auto-launch line.
-    Ensures that after a reboot, opening Termux starts the bot automatically.
+    V10.9: Silently ensure ~/.bashrc contains the auto-launch line.
     """
     try:
         bashrc_path = os.path.expanduser("~/.bashrc")
-        
-        # V10.8: Standard pgrep launch guard
         launch_cmd = f'if ! pgrep -f "python.*main.py.*{DEVICE_ID}" > /dev/null; then cd {_bot_dir} && nohup python main.py {DEVICE_ID} > /dev/null 2>&1 & fi'
-        
-        marker = f"# Aegis V10.8 Auto-patch — {DEVICE_ID}"
-        
-        # Check if already injected
+        marker = f"# Aegis V10.9 Auto-patch — {DEVICE_ID}"
         if os.path.exists(bashrc_path):
             with open(bashrc_path, 'r') as f:
                 content = f.read()
-            if marker in content:
-                logger.debug(f"🔱 V10.8 BASHRC: Persistence verified for {DEVICE_ID}")
-                return
-        
-        # Append to bashrc
+            if marker in content: return
         with open(bashrc_path, 'a') as f:
             f.write(f"\n{marker}\n")
             f.write(f"{launch_cmd}\n")
-        
-        logger.info(f"🔱 V10.8 BASHRC: Silent auto-patch applied for {DEVICE_ID}")
-        
+        logger.info(f"🔱 V10.9 BASHRC: Silent auto-patch applied for {DEVICE_ID}")
     except Exception as e:
-        logger.warning(f"🔱 V10.8 BASHRC: Patch warning: {e}")
+        logger.warning(f"🔱 V10.9 BASHRC: Patch warning: {e}")
 
-async def protect_child_processes():
+def protect_child_processes():
     """
-    V10.0: Apply -1000 OOM protection to ALL child processes recursively.
-    Makes clones, ADB, shell, and all subprocesses "Unkillable" by Android LMK.
+    V10.9: Sync OOM protection for ALL child processes.
     """
     try:
         bot_pid = os.getpid()
         protected_count = 0
         
-        # Find all child processes of the bot (direct children)
-        ret, stdout, _ = await run_bash(f"su -c 'pgrep -P {bot_pid} 2>/dev/null || echo NONE'")
-        if ret == 0 and stdout.strip() and stdout.strip() != "NONE":
+        _, stdout, _ = run_bash(f"su -c 'pgrep -P {bot_pid} 2>/dev/null || echo NONE'")
+        if stdout.strip() and stdout.strip() != "NONE":
             direct_children = stdout.strip().split('\n')
-            
             for child_pid in direct_children:
-                if not child_pid.strip():
-                    continue
+                if not child_pid.strip(): continue
                 child_pid = child_pid.strip()
-                
-                # Apply -1000 OOM score to direct child
-                await run_bash(f"su -c 'echo -1000 > /proc/{child_pid}/oom_score_adj 2>/dev/null'")
+                run_bash(f"su -c 'echo -1000 > /proc/{child_pid}/oom_score_adj 2>/dev/null'")
                 protected_count += 1
                 
-                # Recursively find grandchildren (ADB subprocesses, etc.)
-                ret2, grandchild_out, _ = await run_bash(f"su -c 'pgrep -P {child_pid} 2>/dev/null || echo NONE'")
-                if ret2 == 0 and grandchild_out.strip() and grandchild_out.strip() != "NONE":
+                _, grandchild_out, _ = run_bash(f"su -c 'pgrep -P {child_pid} 2>/dev/null || echo NONE'")
+                if grandchild_out.strip() and grandchild_out.strip() != "NONE":
                     grandchildren = grandchild_out.strip().split('\n')
                     for grandchild in grandchildren:
                         if grandchild.strip():
-                            await run_bash(f"su -c 'echo -1000 > /proc/{grandchild.strip()}/oom_score_adj 2>/dev/null'")
+                            run_bash(f"su -c 'echo -1000 > /proc/{grandchild.strip()}/oom_score_adj 2>/dev/null'")
                             protected_count += 1
-            
-            logger.info(f"🔱 V10.0: Applied OOM protection to {protected_count} child processes")
+            logger.info(f"🔱 V10.9: Protected {protected_count} children")
     except Exception as e:
-        logger.debug(f"🔱 V10.0: Child protection warning: {e}")
+        logger.debug(f"🔱 V10.9: Child protection error: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # V8.0 EMERGENCY RAM RECOVERY — STOP/CONT Protocol
@@ -395,7 +326,7 @@ async def emergency_ram_recovery(bot_instance: "AegisBot"):
                 pid = await InjectionEngine.get_clone_pid(victim)
                 if pid:
                     # STOP the clone - freeze its RAM usage entirely
-                    await run_bash(f"su -c 'kill -STOP {pid}'")
+                    run_bash(f"su -c 'kill -STOP {pid}'")
                     _emergency_stopped[victim] = time.time()
                     logger.critical(f"🚨 V8.0 EMERGENCY: STOPPED {victim} (PID {pid}) to freeze RAM")
                     
@@ -431,8 +362,9 @@ async def _resume_clone_after_emergency(bot_instance: "AegisBot", name: str, pid
         
         # Try to resume
         try:
-            await run_bash(f"su -c 'kill -CONT {pid}'")
-            logger.info(f"🚨 V8.0 EMERGENCY: RESUMED {name} (PID {pid})")
+            if pid:
+                run_bash(f"su -c 'kill -9 {pid}'")
+                logger.info(f"⚓ ANCHOR: Stopped {name} (PID {pid})")
         except Exception as e:
             logger.error(f"🚨 V8.0 EMERGENCY: Failed to resume {name}: {e}")
             # If resume fails, mark as stopped
@@ -450,12 +382,13 @@ async def check_system_ui_health() -> bool:
     """
     try:
         # Check if system_server is running
-        ret, stdout, _ = await run_bash("su -c 'service list | grep system_server'")
+        ret, stdout, _ = run_bash("su -c 'service list | grep system_server'")
         if ret != 0 or not stdout.strip():
             return False
         
-        # Additional check: can we get window info
-        ret2, _, _ = await run_bash("su -c 'dumpsys window | head -5' 2>/dev/null")
+        # Step 1: Capture top window for crash detection
+        _, stdout, _ = run_bash("su -c 'dumpsys window | head -5' 2>/dev/null")
+        ret2, _, _ = run_bash("su -c 'dumpsys window | head -5' 2>/dev/null")
         if ret2 != 0:
             return False
             
@@ -519,12 +452,15 @@ async def scan_and_adopt_clones(bot_instance: "AegisBot"):
         pid = await InjectionEngine.get_clone_pid(name)
         if pid:
             # Verify it's actually a Roblox process
-            ret, cmdline, _ = await run_bash(f"su -c 'cat /proc/{pid}/cmdline 2>/dev/null || echo UNKNOWN'")
-            if ret == 0 and f"com.roblox.{name}" in cmdline:
-                # Adopt this clone
-                bot_instance.set_state(name, CloneState.RUNNING)
-                adopted += 1
-                logger.info(f"🔍 V8.0 PID-LOCK RECOVERY: Adopted {name} (PID {pid})")
+            try:
+                ret, cmdline, _ = run_bash(f"su -c 'cat /proc/{pid}/cmdline 2>/dev/null || echo UNKNOWN'")
+                if ret == 0 and f"com.roblox.{name}" in cmdline:
+                    # Adopt this clone
+                    bot_instance.set_state(name, CloneState.RUNNING)
+                    adopted += 1
+                    logger.info(f"🔍 V8.0 PID-LOCK RECOVERY: Adopted {name} (PID {pid})")
+            except Exception as e:
+                logger.error(f"Error adopting {name}: {e}")
     
     if adopted > 0:
         logger.info(f"🔍 V8.0 PID-LOCK RECOVERY: Adopted {adopted} existing clones")
@@ -571,8 +507,9 @@ async def surgical_trim(bot_instance: "AegisBot"):
                     runtime = time.time() - bot_instance.running_since.get(name, time.time())
                     if runtime > 300:  # 5 minutes
                         # Set inactive to free GPU buffers without killing
-                        await run_bash(f"su -c 'am set-inactive {package} true'")
-                        logger.info(f"⚓ ANCHOR: Surgical trim applied to {name}")
+                        if "com.roblox" in package:
+                            run_bash(f"su -c 'am set-inactive {package} true'")
+                            logger.info(f"⚓ ANCHOR: Surgical trim applied to {name}")
                         
             # Also drop system caches
             await InjectionEngine.clear_memory()
@@ -650,7 +587,7 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
                     pid = await InjectionEngine.get_clone_pid(name)
                     if pid:
                         # V10.3: UI-Independent thread count via monolithic kernel access
-                        thread_count, status = await MonitorEngine.get_thread_count_v103(pid)
+                        thread_count, status = MonitorEngine.get_thread_count_v103(pid)
                         MonitorEngine.record_thread_history(name, thread_count)
                         
                         # Collect CPU usage
@@ -705,15 +642,15 @@ async def force_redraw() -> bool:
     """
     try:
         # Method 1: Send refresh broadcast (safe, doesn't kill anything)
-        await run_bash("su -c 'am broadcast -a android.intent.action.SCREEN_OFF'")
+        run_bash("su -c 'am broadcast -a android.intent.action.SCREEN_OFF'")
         await asyncio.sleep(0.5)
-        await run_bash("su -c 'am broadcast -a android.intent.action.SCREEN_ON'")
+        run_bash("su -c 'am broadcast -a android.intent.action.SCREEN_ON'")
         
         # Method 2: Activity manager nudge
-        await run_bash("su -c 'service call activity 42 i32 0' 2>/dev/null || true")
+        run_bash("su -c 'service call activity 42 i32 0' 2>/dev/null || true")
         
         # Method 3: Input keyevent to wake up the system
-        await run_bash("su -c 'input keyevent 82' 2>/dev/null || true")  # Menu key
+        run_bash("su -c 'input keyevent 82' 2>/dev/null || true")  # Menu key
         
         logger.info("🔄 FORCE REDRAW: System UI nudge executed")
         return True
@@ -728,7 +665,7 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
     """
     global _system_ui_crashed
     
-    logger.info("� V9.0 KEEP-ALIVE: Daemon started (System Immortal Mode)")
+    logger.info(" V9.0 KEEP-ALIVE: Daemon started (System Immortal Mode)")
     heartbeat_count = 0
     systemui_restarting = False
     pause_until = 0
@@ -739,8 +676,8 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
         now = time.time()
         
         try:
-            # V9.0: Detect SystemUI restart (Headless Recovery Mode)
-            ret, stdout, _ = await run_bash("su -c 'dumpsys activity activities | grep -i systemui' 2>/dev/null || echo NONE")
+            # V9.0: Detect SystemUI restart    async def _verify_system_v8(self):
+            ret, stdout, _ = run_bash("su -c 'dumpsys activity activities | grep -i systemui' 2>/dev/null || echo NONE")
             systemui_healthy = ret == 0 and "systemui" in stdout.lower()
             
             if not systemui_healthy and not systemui_restarting:
@@ -760,15 +697,15 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
             if in_pause and heartbeat_count % 2 == 0:
                 logger.info(f"🔱 V9.0 HEADLESS RECOVERY: Pause remaining {int(pause_until - now)}s — clones running via background commands")
             
-            # 1. Headless heartbeat - always run (bypasses UI)
-            await run_bash("su -c 'input -d 0 tap 540 960' 2>/dev/null || su -c 'input tap 540 960' 2>/dev/null || true")
+            # Simulate "Back" or "Tap" to keep device awake
+            run_bash("su -c 'input -d 0 tap 540 960' 2>/dev/null || su -c 'input tap 540 960' 2>/dev/null || true")
             
             # 2. Memory pressure check — EMERGENCY PROTOCOL (always run)
             await emergency_ram_recovery(bot_instance)
             
             # 3. Periodic child protection (always run for OOM immunity)
             if heartbeat_count % 10 == 0:  # Every 5 minutes
-                await protect_child_processes()
+                protect_child_processes()
             
             # 4. PID validation for all clones (always run - critical for farm)
             for name, state in list(bot_instance.clone_states.items()):
@@ -778,7 +715,7 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
                     if not verified:
                         pid = await InjectionEngine.get_clone_pid(name)
                         if not pid:
-                            logger.warning(f"� V9.0: [{name}] Lost via dumpsys & pidof, marking STOPPED")
+                            logger.warning(f" V9.0: [{name}] Lost via dumpsys & pidof, marking STOPPED")
                             bot_instance.set_state(name, CloneState.STOPPED)
             
             # 5. Non-essential operations (SKIP during Headless Recovery)
@@ -789,14 +726,14 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
                 
                 # Periodic logging (reduced during normal operation)
                 if heartbeat_count % 10 == 0:  # Every 5 minutes
-                    logger.info(f"� V9.0 Keep-Alive #{heartbeat_count}")
+                    logger.info(f" V9.0 Keep-Alive #{heartbeat_count}")
             else:
                 # During pause: minimal logging only
                 if heartbeat_count % 2 == 0:
                     logger.debug(f"🔱 V9.0 Headless mode — logging suppressed")
                         
         except Exception as e:
-            logger.error(f"� V9.0 Keep-Alive error: {e}")
+            logger.error(f" V9.0 Keep-Alive error: {e}")
             await asyncio.sleep(5)
 
 
@@ -1109,9 +1046,10 @@ class AegisBot:
             current_score = run_bash(f"cat /proc/{pid}/oom_score_adj")
 
             # 2. Find and harden ALL Roblox PIDs recursively
-            stdout = run_bash("pgrep -f 'com.roblox'")
+            stdout_ret, stdout, stderr = run_bash("pgrep -f 'com.roblox'")
+            
             protected = 0
-            if stdout and not stdout.startswith("Error:"):
+            if stdout_ret == 0 and stdout and not stdout.startswith("Error:"):
                 pids = stdout.split('\n')
                 for p in pids:
                     if p.strip():
@@ -1234,7 +1172,7 @@ class AegisBot:
         
         try:
             # Step 1: git fetch --all
-            ret1, out1, err1 = await run_bash(f"git -C {_bot_dir} fetch --all 2>&1")
+            ret1, out1, err1 = run_bash(f"git -C {_bot_dir} fetch --all 2>&1")
             if ret1 != 0:
                 await update.message.reply_text(
                     f"❌ Git fetch failed:\n```\n{err1 or out1}\n```",
@@ -1243,7 +1181,7 @@ class AegisBot:
                 return
             
             # Step 2: git reset --hard origin/main
-            ret2, out2, err2 = await run_bash(f"git -C {_bot_dir} reset --hard origin/main 2>&1")
+            ret2, out2, err2 = run_bash(f"git -C {_bot_dir} reset --hard origin/main 2>&1")
             result = (out2 or err2 or "(no output)")[:2000]
             
             await update.message.reply_text(
@@ -1533,7 +1471,7 @@ class AegisBot:
             pid = await InjectionEngine.get_clone_pid(name)
             if pid:
                 logger.error(f"🛑 [{name}] Surgical kill failed — force killing")
-                await run_bash(f"su -c 'kill -9 {pid}'")
+                run_bash(f"su -c 'kill -9 {pid}'")
             
             if chat_id and self.application:
                 try:
@@ -1594,9 +1532,9 @@ class AegisBot:
                 self._streamer = None
 
     async def _take_screenshot(self, message):
-        buf = "/data/local/tmp/aegis_shot.png"
         try:
-            ret, _, err = await run_bash(f"su -c 'screencap -p {buf} && chmod 644 {buf}'")
+            buf = "/data/local/tmp/aegis_shot.png"
+            ret, _, err = run_bash(f"su -c 'screencap -p {buf} && chmod 644 {buf}'")
             if ret != 0:
                 await message.reply_text(f"❌ screencap failed: {err}")
                 return
@@ -1609,8 +1547,8 @@ class AegisBot:
     async def _git_sync(self, chat_id: int):
         try:
             if self.application:
-                await self.application.bot.send_message(chat_id, "♻️ Git Sync…")
-            ret, out, err = await run_bash(f"git -C {_bot_dir} pull --rebase 2>&1")
+                await self.application.bot.send_message(chat_id, "♻️ Git Sync...")
+            ret, out, err = run_bash(f"git -C {_bot_dir} pull --rebase 2>&1")
             result = (out or err or "(no output)")[:3000]
             if self.application:
                 await self.application.bot.send_message(
@@ -1637,8 +1575,8 @@ class AegisBot:
             sys.exit(1)
         
         try:
-            # V10.8: SELF-HEALING ASYNC BOOT — Hardening must be awaited inside the loop
-            logger.info(f"🔱 PROJECT AEGIS V10.8 KERNEL AUTO-ROOT — {DEVICE_ID}")
+            # V10.9: SELF-HEALING ASYNC BOOT — Hardening must be awaited inside the loop
+            logger.info(f"🔱 PROJECT AEGIS V10.9 KERNEL AUTO-ROOT — {DEVICE_ID}")
             await self._init_kernel_hardening()
             
             # V10.8: BASHRC AUTO-INJECTOR — Check every run
@@ -1679,7 +1617,7 @@ class AegisBot:
             # 7. Auto-resume
             asyncio.create_task(self._auto_resume())
 
-            logger.info(f"🔱 PROJECT AEGIS V10.8 KERNEL AUTO-ROOT ACTIVE — {DEVICE_ID}")
+            logger.info(f"🔱 PROJECT AEGIS V10.9 KERNEL AUTO-ROOT ACTIVE — {DEVICE_ID}")
 
             # 8. Poll
             await app.updater.start_polling(drop_pending_updates=True)

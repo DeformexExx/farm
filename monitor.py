@@ -7,20 +7,6 @@ import asyncio
 from typing import Optional, Dict, Tuple
 from bash_utils import run_bash
 
-# Import global run_bash for V10.7 sync execution
-try:
-    from main import run_bash as run_bash_sync
-except ImportError:
-    # Fallback if being run or imported differently
-    def run_bash_sync(command):
-        import subprocess
-        try:
-            safe_cmd = command.replace('"', '\\"')
-            full_cmd = f'su -c "{safe_cmd}"'
-            return subprocess.check_output(full_cmd, shell=True, stderr=subprocess.STDOUT).decode().strip()
-        except Exception as e:
-            return f"Error: {str(e)}"
-
 logger = logging.getLogger("MonitorEngineV107")
 
 class MonitorEngine:
@@ -42,8 +28,8 @@ class MonitorEngine:
         try:
             # Clean string parsing to avoid errors. Uses synchronous global run_bash.
             cmd = f"cat /proc/{pid}/status | grep Threads"
-            stdout = run_bash_sync(cmd)
-            if stdout and not stdout.startswith("Error:"):
+            _, stdout, stderr = run_bash(cmd)
+            if stdout:
                 # Parse "Threads: 159" → extract 159
                 match = re.search(r'Threads:\s*(\d+)', stdout)
                 if match:
@@ -143,7 +129,7 @@ class MonitorEngine:
             return -1.0
         try:
             # Use top command for single process CPU
-            ret, stdout, _ = await run_bash(f"su -c 'top -p {pid} -n 1 2>/dev/null | grep {pid}'")
+            ret, stdout, _ = run_bash(f"su -c 'top -p {pid} -n 1 2>/dev/null | grep {pid}'")
             if ret == 0 and stdout.strip():
                 # Parse CPU column from top output
                 parts = stdout.strip().split()
@@ -155,9 +141,9 @@ class MonitorEngine:
                     except (ValueError, IndexError):
                         pass
             # Alternative: use /proc/{pid}/stat calculation
-            ret2, stat1, _ = await run_bash(f"su -c 'cat /proc/{pid}/stat 2>/dev/null'")
+            ret2, stat1, _ = run_bash(f"su -c 'cat /proc/{pid}/stat 2>/dev/null'")
             if ret2 == 0:
-                ret3, uptime_str, _ = await run_bash("su -c 'cat /proc/uptime'")
+                ret3, uptime_str, _ = run_bash("su -c 'cat /proc/uptime'")
                 if ret3 == 0:
                     try:
                         uptime = float(uptime_str.split()[0])
@@ -333,12 +319,12 @@ class MonitorEngine:
         
         try:
             logger.critical(f"👻 V8.7 GHOST KILL: Killing {clone_name} (PID {pid}) — stuck at 1 thread for 5min+")
-            ret, _, _ = await run_bash(f"su -c 'kill -9 {pid}'")
+            ret, _, _ = run_bash(f"su -c 'kill -9 {pid}'")
             
             # Verify death
-            await asyncio.sleep(1)
-            check_ret, _, _ = await run_bash(f"su -c 'kill -0 {pid} 2>/dev/null && echo ALIVE || echo DEAD'")
-            success = "DEAD" in check_ret
+            time.sleep(1)
+            _, check_stdout, _ = run_bash(f"su -c 'kill -0 {pid} 2>/dev/null && echo ALIVE || echo DEAD'")
+            success = "DEAD" in check_stdout
             
             if success:
                 logger.info(f"👻 V8.7 GHOST KILL: {clone_name} terminated successfully")
@@ -354,7 +340,7 @@ class MonitorEngine:
     async def get_clone_pid(clone_name: str) -> str:
         """Get specific PID for a clone package. Returns empty string if not running."""
         package = f"com.roblox.{clone_name}"
-        ret, stdout, _ = await run_bash(f"su -c 'pidof {package}'")
+        ret, stdout, _ = run_bash(f"su -c 'pidof {package}'")
         if ret == 0 and stdout.strip():
             pid = stdout.strip().split()[0]
             MonitorEngine._pid_cache[clone_name] = pid
@@ -368,8 +354,8 @@ class MonitorEngine:
         if clone_name in MonitorEngine._pid_cache:
             # Verify still alive
             pid = MonitorEngine._pid_cache[clone_name]
-            ret, _, _ = await run_bash(f"su -c 'kill -0 {pid} 2>/dev/null && echo ALIVE || echo DEAD'")
-            if "ALIVE" in ret:
+            _, stdout, _ = run_bash(f"su -c 'kill -0 {pid} 2>/dev/null && echo ALIVE || echo DEAD'")
+            if "ALIVE" in stdout:
                 return pid
             # PID died, remove from cache
             MonitorEngine._pid_cache.pop(clone_name, None)
@@ -383,7 +369,7 @@ class MonitorEngine:
         """
         package = f"com.roblox.{clone_name}"
         try:
-            ret, stdout, _ = await run_bash(
+            ret, stdout, _ = run_bash(
                 f"su -c 'dumpsys activity activities | grep -i {package}'"
             )
             if ret == 0 and stdout.strip():
@@ -426,7 +412,7 @@ class MonitorEngine:
         V8.2: Direct Kernel Thread Counting — returns real thread count from /proc.
         Uses kernel scanner for reliable numbers, no more [SCANNING...].
         """
-        ret, stdout_pid, _ = await run_bash(f"su -c 'pidof com.roblox.{clone_name}'")
+        ret, stdout_pid, _ = run_bash(f"su -c 'pidof com.roblox.{clone_name}'")
         pid = stdout_pid.strip()
         
         if ret == 0 and pid:
@@ -439,7 +425,7 @@ class MonitorEngine:
                 
                 # Get RSS memory
                 cmd_stats = f"su -c 'cat /proc/{pid}/status | grep -E \"VmRSS\"'"
-                ret_st, stdout_st, _ = await run_bash(cmd_stats)
+                ret_st, stdout_st, _ = run_bash(cmd_stats)
                 mem = "?"
                 if ret_st == 0:
                     for line in stdout_st.split('\n'):
