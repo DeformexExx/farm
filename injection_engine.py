@@ -16,11 +16,18 @@ class InjectionEngine:
     
     @staticmethod
     async def get_clone_pid(clone_name: str) -> str:
-        """Get specific PID for a clone. Returns empty string if not running."""
+        """V11.0: Robust PID Hunter — ps | grep | awk"""
+        # User Directive: su -c "ps -A | grep -i 'com.roblox.clien' | grep '{suffix}' | awk '{{print $2}}'"
+        # We assume clone_name is the suffix (e.g. 'clienb') or contains it.
+        # Direct match on the full package name is most robust.
         package = f"com.roblox.{clone_name}"
-        ret, stdout, _ = run_bash(f"su -c 'pidof {package}'")
+        cmd = f"su -c \"ps -A | grep -i '{package}' | grep -v grep | awk '{{print $2}}'\""
+        ret, stdout, _ = run_bash(cmd)
         if ret == 0 and stdout.strip():
-            return stdout.strip().split()[0]
+            # In case multiple PIDs found (unlikely), take the last one (usually newest)
+            pids = stdout.strip().split()
+            if pids:
+                return pids[-1]
         return ""
     
     @staticmethod
@@ -64,17 +71,20 @@ class InjectionEngine:
 
     @staticmethod
     async def get_running_clones() -> list:
-        """Scan for all active Roblox clones."""
+        """V11.0: Robust scan for all active Roblox clones."""
         active = []
-        ret, stdout, _ = run_bash("su -c 'ps -A | grep com.roblox | grep -v grep'")
+        # Find all com.roblox processes
+        ret, stdout, _ = run_bash("su -c \"ps -A | grep 'com.roblox' | grep -v grep\"")
         if ret == 0 and stdout.strip():
             for line in stdout.strip().split('\n'):
+                # Extract package name (usually the last column)
                 parts = line.split()
                 if len(parts) >= 8:
                     pkg = parts[-1]
-                    if pkg.startswith("com.roblox."):
-                        name = pkg.replace("com.roblox.", "")
-                        if name not in active: active.append(name)
+                    if "com.roblox." in pkg:
+                        name = pkg.split("com.roblox.")[-1]
+                        if name not in active:
+                            active.append(name)
         return active
 
     @staticmethod

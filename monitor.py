@@ -25,29 +25,28 @@ class MonitorEngine:
         if not pid:
             return None, "[ERR]"
         
-        # V10.7: DIRECT KERNEL SIGHT — ONLY this method, no alternatives
+        # V11.0: THE KERNEL HUNTER — Direct task enumeration
         try:
-            # Clean string parsing to avoid errors. Uses synchronous global run_bash.
-            cmd = f"cat /proc/{pid}/status | grep Threads"
+            # User Directive: su -c "ls /proc/{pid}/task | wc -l"
+            cmd = f"su -c 'ls /proc/{pid}/task 2>/dev/null | wc -l'"
             _, stdout, stderr = run_bash(cmd)
             
-            # V10.9 DEBUG: Log raw output to find su/permission hangs
-            logger.info(f"📊 Telemetry Raw for {pid}: {stdout}")
+            # V11.0 DEBUG: Log raw output
+            logger.info(f"🛰 Hunter Threads for {pid}: {stdout}")
             
-            if stdout:
-                # V10.9: Simplified regex (\d+) as requested
-                match = re.search(r'(\d+)', stdout)
-                if match:
-                    count = int(match.group(1))
-                    if count == 1:
-                        return count, "idle"  # 1 thread = IDLE/LOADING
-                    elif count > 1:
-                        return count, "active"
+            if stdout and stdout.strip().isdigit():
+                count = int(stdout.strip())
+                if count == 1:
+                    return count, "idle"
+                elif count > 1:
+                    return count, "active"
+                elif count == 0:
+                    return 0, "offline"
             
-            return None, "[OFFLINE]"
+            return None, "offline"
         except Exception as e:
-            logger.debug(f"V10.7: Thread count failed for PID {pid}: {e}")
-            return None, "[OFFLINE]"
+            logger.debug(f"V11.0: Hunter thread count failed for PID {pid}: {e}")
+            return None, "offline"
     
     @staticmethod
     async def get_thread_count_kernel(pid: str) -> Tuple[int, str]:
@@ -414,20 +413,19 @@ class MonitorEngine:
 
     @staticmethod
     async def get_clone_status(clone_name: str) -> str:
-        """
-        V8.2: Direct Kernel Thread Counting — returns real thread count from /proc.
-        Uses kernel scanner for reliable numbers, no more [SCANNING...].
-        """
-        ret, stdout_pid, _ = run_bash(f"su -c 'pidof com.roblox.{clone_name}'")
-        pid = stdout_pid.strip()
+        """V11.0: THE KERNEL HUNTER — Robust PID discovery"""
+        # We reuse the tested InjectionEngine hunter logic
+        from injection_engine import InjectionEngine
+        pid = await InjectionEngine.get_clone_pid(clone_name)
         
-        if ret == 0 and pid:
+        if pid:
             try:
-                # V8.2: Use kernel scanner for thread count
+                # V8.2: Use kernel scanner for thread count (Now V11.0 Hunter)
                 thread_count, source = await MonitorEngine.get_thread_count_kernel(pid)
                 
                 # Record for freeze detection (Only if valid)
                 if thread_count is not None:
+                    # V11.0: Record real count (can be 0 or high)
                     MonitorEngine.record_thread_history(clone_name, thread_count)
                 
                 # Get RSS memory

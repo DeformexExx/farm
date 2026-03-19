@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V10.9 Final Structural Integrity
+# main.py — Project Aegis V11.0 The Kernel Hunter
 import os
 import sys
 import re
@@ -31,7 +31,7 @@ def run_bash(cmd: str) -> tuple[int, str, str]:
 # ═══════════════════════════════════════════════════════════════════════════
 # V10.9: GLOBAL CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "10.9"
+VERSION = "11.0"
 
 if len(sys.argv) < 2:
     print("❌ Usage: python main.py <DEVICE_ID>")
@@ -231,8 +231,8 @@ def system_harden_v109():
     # Step 1: Apply OOM -1000 to bot itself
     run_bash(f"su -c 'echo -1000 > {oom_path}'")
     
-    # Step 2: Auto-find and harden ALL Roblox PIDs
-    _, stdout, _ = run_bash("pgrep -f 'com.roblox'")
+    # Step 2: Auto-find and harden ALL Roblox PIDs (V11.0 Hunter)
+    _, stdout, _ = run_bash("su -c \"ps -A | grep -i 'com.roblox' | grep -v grep | awk '{print $2}'\"")
     protected = 0
     if stdout:
         pids = stdout.split('\n')
@@ -252,7 +252,8 @@ def ensure_bashrc_injected():
     """
     try:
         bashrc_path = os.path.expanduser("~/.bashrc")
-        launch_cmd = f'if ! pgrep -f "python.*main.py.*{DEVICE_ID}" > /dev/null; then cd {_bot_dir} && nohup python main.py {DEVICE_ID} > /dev/null 2>&1 & fi'
+        # V11.0 Hunter: ps -A | grep is more stable than pgrep
+        launch_cmd = f'if ! ps -A | grep -i "python.*main.py.*{DEVICE_ID}" | grep -v grep > /dev/null; then cd {_bot_dir} && nohup python main.py {DEVICE_ID} > /dev/null 2>&1 & fi'
         marker = f"# Aegis V10.9 Auto-patch — {DEVICE_ID}"
         if os.path.exists(bashrc_path):
             with open(bashrc_path, 'r') as f:
@@ -273,7 +274,9 @@ def protect_child_processes():
         bot_pid = os.getpid()
         protected_count = 0
         
-        _, stdout, _ = run_bash(f"su -c 'pgrep -P {bot_pid} 2>/dev/null || echo NONE'")
+        # V11.0 Hunter: Replace pgrep -P with ps-based PPID filtering
+        cmd_children = f"su -c \"ps -A | awk '\\$3 == {bot_pid} {{print \\$2}}'\""
+        _, stdout, _ = run_bash(cmd_children)
         if stdout.strip() and stdout.strip() != "NONE":
             direct_children = stdout.strip().split('\n')
             for child_pid in direct_children:
@@ -282,7 +285,8 @@ def protect_child_processes():
                 run_bash(f"su -c 'echo -1000 > /proc/{child_pid}/oom_score_adj 2>/dev/null'")
                 protected_count += 1
                 
-                _, grandchild_out, _ = run_bash(f"su -c 'pgrep -P {child_pid} 2>/dev/null || echo NONE'")
+                cmd_grand = f"su -c \"ps -A | awk '\\$3 == {child_pid} {{print \\$2}}'\""
+                _, grandchild_out, _ = run_bash(cmd_grand)
                 if grandchild_out.strip() and grandchild_out.strip() != "NONE":
                     grandchildren = grandchild_out.strip().split('\n')
                     for grandchild in grandchildren:
@@ -591,6 +595,10 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
                         
                         # V10.9: Record status even if None to allow UI [OFFLINE] state
                         MonitorEngine.record_thread_history(name, thread_count if thread_count is not None else -1)
+                        
+                        # V11.0: OOM IMMUNITY HUNTER
+                        # Apply -1000 to all discovered Roblox PIDs
+                        run_bash(f"su -c 'echo -1000 > /proc/{pid}/oom_score_adj'")
                         
                         # Collect CPU usage
                         cpu = await MonitorEngine.get_clone_cpu_usage(name, pid)
@@ -1054,7 +1062,8 @@ class AegisBot:
             current_score = run_bash(f"cat /proc/{pid}/oom_score_adj")
 
             # 2. Find and harden ALL Roblox PIDs recursively
-            stdout_ret, stdout, stderr = run_bash("pgrep -f 'com.roblox'")
+            # V11.0 Hunter: Stable Roblox discovery
+            stdout_ret, stdout, stderr = run_bash("su -c \"ps -A | grep -i 'com.roblox' | grep -v grep | awk '{print $2}'\"")
             
             protected = 0
             if stdout_ret == 0 and stdout and not stdout.startswith("Error:"):
