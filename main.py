@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V10.0 Kernel Auto-Root & Persistence
+# main.py — Project Aegis V10.1 Monolithic Kernel Access
 import os
 import sys
+import re
 import enum
 import asyncio
 import logging
 import time
 import signal
 import threading
-from typing import Optional, Dict
+import subprocess
+from typing import Optional, Dict, Tuple
 from datetime import datetime, timedelta
 
 # ── ABSOLUTE PATH LOCK ─────────────────────────────────────────────────────
@@ -27,27 +29,36 @@ from config_manager      import ConfigManager
 from ui_manager          import UIManager
 from monitor             import MonitorEngine
 from injection_engine    import InjectionEngine
-from bash_utils          import run_bash as _run_bash
 from persistence_manager import PersistenceManager
 
 # ═══════════════════════════════════════════════════════════════════════════
-# V10.0: GLOBAL run_bash WRAPPER — Handles errors without crashing
+# V10.1: MONOLITHIC run_bash — Completely standalone, thread-safe
 # ═══════════════════════════════════════════════════════════════════════════
-async def run_bash(command: str) -> tuple:
+async def run_bash(command: str, use_su: bool = True) -> Tuple[int, str, str]:
     """
-    V10.0: Global wrapper for bash commands with error handling.
-    Returns (returncode, stdout, stderr) without crashing the main loop.
+    V10.1: Standalone global run_bash. No dependencies, thread-safe.
+    Uses subprocess with optional su -c wrapper.
+    Returns (returncode, stdout, stderr) — NEVER crashes the caller.
     """
     try:
-        return await _run_bash(command)
+        if use_su and not command.startswith("su -c"):
+            command = f'su -c "{command.replace(\'"\', \\\'\\\')}"'
+        
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
     except Exception as e:
-        logger.error(f"🔱 V10.0 run_bash error: {e}")
+        # Critical: Never crash the thread, return error tuple
         return -1, "", str(e)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "10.0"
+VERSION = "10.1"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -259,69 +270,64 @@ async def anchor_to_system():
 
 async def system_harden():
     """
-    V10.0 SELF-HEALING AUTO-ROOT: Apply OOM -1000 protection on startup with verification.
-    Retries with different su methods if initial write fails.
+    V10.1 MONOLITHIC KERNEL ACCESS: Auto OOM -1000 for bot + ALL Roblox PIDs.
+    Zero-touch automation — runs on every startup without user input.
     """
     pid = os.getpid()
     oom_path = f"/proc/{pid}/oom_score_adj"
     
-    logger.info(f"🔱 V10.0 SYSTEM HARDEN: Hardening PID {pid}...")
+    logger.info(f"🔱 V10.1 KERNEL ACCESS: Hardening PID {pid}...")
     
-    # Method 1: Direct su echo
-    ret, _, _ = await run_bash(f"su -c 'echo -1000 > {oom_path}'")
-    
-    # Method 2: If first failed, try sh -c wrapper
+    # Step 1: Apply OOM -1000 to bot itself
+    ret, _, _ = await run_bash(f"echo -1000 > {oom_path}", use_su=True)
     if ret != 0:
-        logger.warning("🔱 V10.0: Method 1 failed, trying Method 2 (sh -c wrapper)...")
-        ret, _, _ = await run_bash(f"su -c 'sh -c \"echo -1000 > {oom_path}\"'")
+        ret, _, _ = await run_bash(f"sh -c 'echo -1000 > {oom_path}'", use_su=True)
     
-    # Method 3: If still failed, try with exec
-    if ret != 0:
-        logger.warning("🔱 V10.0: Method 2 failed, trying Method 3 (exec)...")
-        ret, _, _ = await run_bash(f"su -c 'exec echo -1000 > {oom_path}'")
-    
-    # VERIFICATION: Read back the value
-    verify_ret, verify_out, _ = await run_bash(f"su -c 'cat {oom_path}'")
+    # Verification
+    verify_ret, verify_out, _ = await run_bash(f"cat {oom_path}", use_su=True)
     current_score = verify_out.strip() if verify_ret == 0 else "ERROR"
     
     if current_score == "-1000":
-        logger.info("🔱 V10.0 SYSTEM HARDEN: ✅ OOM score verified as -1000 — BOT IS UNKILLABLE")
+        logger.info("🔱 V10.1 KERNEL ACCESS: ✅ Bot OOM score is -1000 — UNKILLABLE")
     else:
-        logger.critical(f"🔱 V10.0 SYSTEM HARDEN: ❌ OOM score is {current_score}, expected -1000 — BOT MAY BE KILLED BY LMK!")
-        # Emergency: try one more time with different approach
-        await run_bash(f"su -c 'echo -1000 > {oom_path} 2>/dev/null; cat {oom_path}'")
+        logger.critical(f"🔱 V10.1 KERNEL ACCESS: ❌ Bot OOM score is {current_score} — CRITICAL!")
     
-    # Apply CPU priority
-    await run_bash(f"su -c 'renice -n -20 -p {pid} 2>/dev/null || renice -n -15 -p {pid}'")
+    # Step 2: Auto-find and harden ALL Roblox PIDs
+    ret, stdout, _ = await run_bash("pgrep -f 'com.roblox' 2>/dev/null", use_su=True)
+    if ret == 0 and stdout.strip():
+        roblox_pids = stdout.strip().split('\n')
+        protected = 0
+        for roblox_pid in roblox_pids:
+            if roblox_pid.strip():
+                await run_bash(f"echo -1000 > /proc/{roblox_pid.strip()}/oom_score_adj", use_su=True)
+                protected += 1
+        logger.info(f"🔱 V10.1 KERNEL ACCESS: Applied OOM -1000 to {protected} Roblox PIDs")
     
-    # CPU isolation
-    await run_bash(f"su -c 'taskset -cp 0 {pid} 2>/dev/null'")
+    # Step 3: CPU/Nice priority
+    await run_bash(f"renice -n -20 -p {pid} 2>/dev/null || renice -n -15 -p {pid}", use_su=True)
     
-    # I/O priority
-    await run_bash(f"su -c 'ionice -c 1 -n 0 -p {pid} 2>/dev/null'")
-    
-    logger.info("🔱 V10.0 SYSTEM HARDEN: Hardening complete")
+    logger.info("🔱 V10.1 KERNEL ACCESS: System hardening complete")
 
-# V10.0: BASHRC AUTO-INJECTOR — Checks every run
+# V10.1: BASHRC AUTO-RECOVERY — Checks every run
 def ensure_bashrc_injected():
     """
-    V10.0: Automatically inject launch command into ~/.bashrc every run.
-    Uses pgrep check to prevent duplicates.
+    V10.1: Automatically inject launch command into ~/.bashrc every run.
+    Uses pgrep check to prevent duplicates. Ensures auto-start after reboot.
     """
     try:
         bashrc_path = os.path.expanduser("~/.bashrc")
         
-        # V10.0: The launch string with pgrep protection
-        launch_cmd = f'[ -z "$(pgrep -f \"python.*main.py.*{DEVICE_ID}\")" ] && cd {_bot_dir} && nohup python main.py {DEVICE_ID} > /dev/null 2>&1 &'
+        # V10.1: The launch string with pgrep protection - ensures only one instance
+        launch_cmd = f'if ! pgrep -f "python.*main.py.*{DEVICE_ID}" > /dev/null; then cd {_bot_dir} && nohup python main.py {DEVICE_ID} > /dev/null 2>&1 & fi'
         
-        marker = f"# Aegis V10.0 Auto-boot — {DEVICE_ID}"
+        marker = f"# Aegis V10.1 Auto-recovery — {DEVICE_ID}"
         
         # Check if already injected
         if os.path.exists(bashrc_path):
             with open(bashrc_path, 'r') as f:
                 content = f.read()
             if marker in content:
-                logger.debug(f"🔱 V10.0 BASHRC: Already injected for {DEVICE_ID}")
+                logger.debug(f"🔱 V10.1 BASHRC: Already injected for {DEVICE_ID}")
                 return
         
         # Inject into bashrc
@@ -329,10 +335,10 @@ def ensure_bashrc_injected():
             f.write(f"\n{marker}\n")
             f.write(f"{launch_cmd}\n")
         
-        logger.info(f"🔱 V10.0 BASHRC: Auto-injected launch command for {DEVICE_ID}")
+        logger.info(f"🔱 V10.1 BASHRC: Auto-recovery injected for {DEVICE_ID}")
         
     except Exception as e:
-        logger.warning(f"🔱 V10.0 BASHRC: Injection warning: {e}")
+        logger.warning(f"🔱 V10.1 BASHRC: Injection warning: {e}")
 
 async def protect_child_processes():
     """
@@ -657,8 +663,8 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
                 if state == CloneState.RUNNING:
                     pid = await InjectionEngine.get_clone_pid(name)
                     if pid:
-                        # V9.0: UI-Independent thread count via hard-coded method
-                        thread_count, status = await MonitorEngine.get_thread_count_v87(pid)
+                        # V10.1: UI-Independent thread count via monolithic kernel access
+                        thread_count, status = await MonitorEngine.get_thread_count_v101(pid)
                         MonitorEngine.record_thread_history(name, thread_count)
                         
                         # Collect CPU usage
@@ -1166,8 +1172,8 @@ class AegisBot:
         logger.info(f"🔧 V8.5 REMOTE EXEC: {command}")
         
         try:
-            # Execute command
-            ret, stdout, stderr = await run_bash(f"su -c '{command}'")
+            # V10.1: Execute command via global run_bash (handles su -c automatically)
+            ret, stdout, stderr = await run_bash(command, use_su=True)
             
             # Build output
             output = ""
