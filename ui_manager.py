@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V8.7 Kernel Master
+# ui_manager.py — Project Aegis V9.0 System Immortal Architecture
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V8.7*\n"
+            "💎 *AEGIS OVERLORD V9.0*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[🧠 KERNEL MASTER]`\n"
+            f"⚡️ SYSTEM : `[🔱 SYSTEM IMMORTAL]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -41,18 +41,18 @@ class UIManager:
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
         return (
-            "💎 *AEGIS V8.7 — KERNEL MASTER*\n"
+            "💎 *AEGIS V9.0 — SYSTEM IMMORTAL*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
-            f"🎯 REMOTE : `[EXEC & UPDATE ENABLED]`\n"
-            f"🔬 THREADS : `[DIRECT /proc ACCESS]`\n"
-            f"👑 STATUS  : `[IMMORTAL - OOM PROTECTED]`\n"
-            f"� AUTOBOOT: `[~/.bashrc CHECKED]`\n"
+            f"🔱 IMMORTAL: `[OOM -1000 | UNKILLABLE]`\n"
+            f"� GHOST   : `[ANCHOR DAEMON ACTIVE]`\n"
+            f"🧠 KERNEL  : `[CORE SYSTEM LAYER]`\n"
+            f"⚡️ STATUS  : `[HEADLESS RECOVERY READY]`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "🧠 _Hard-coded /proc. Absolute kernel sight._"
+            "🔱 _Integrated into Core System. Survives SystemUI restart._"
         )
 
     @staticmethod

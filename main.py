@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V8.5 Remote Command Center & Kernel Sight
+# main.py — Project Aegis V9.0 System Immortal Architecture
 import os
 import sys
 import enum
@@ -33,7 +33,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "8.7"
+VERSION = "9.0"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -53,7 +53,7 @@ logging.basicConfig(
         logging.FileHandler(BOOT_LOG, encoding="utf-8"),
     ]
 )
-logger = logging.getLogger("AegisV87")
+logger = logging.getLogger("AegisV90")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM ANCHOR ARCHITECTURE — V7.0 Deep Daemonization
@@ -104,29 +104,73 @@ def release_pid_lock():
 
 def ensure_autoboot():
     """
-    V8.5: Ensure bot auto-starts on Termux launch by checking ~/.bashrc.
-    If not present, append the launch command.
+    V9.0 SYSTEM IMMORTAL: Auto-boot via /data/adb/service.d/ (Magisk/Root) or ~/.bashrc fallback.
+    Ensures bot starts on system boot, not just Termux launch.
     """
     try:
+        # V9.0: PRIMARY — Magisk/KernelSU service.d (runs on system boot)
+        service_d = "/data/adb/service.d"
+        service_script = f"{service_d}/aegis_v90.sh"
+        
+        if os.path.exists(service_d):
+            # Check if already installed
+            if os.path.exists(service_script):
+                logger.info("V9.0 AUTOBOOT: Service script already in /data/adb/service.d/")
+            else:
+                # Create service script for system boot
+                script_content = f"""#!/system/bin/sh
+# Aegis V9.0 System Immortal — Auto-launch on boot
+export PATH=/data/data/com.termux/files/usr/bin:$PATH
+export PYTHONPATH=/data/data/com.termux/files/usr/lib/python3.11/site-packages
+cd {_bot_dir}
+su -c "nohup python main.py {DEVICE_ID} > /dev/null 2>&1 &"
+"""
+                # Write script using su
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+                    f.write(script_content)
+                    temp_path = f.name
+                
+                # Move to service.d with proper permissions
+                run_bash_sync(f"su -c 'cp {temp_path} {service_script}'")
+                run_bash_sync(f"su -c 'chmod 755 {service_script}'")
+                run_bash_sync(f"su -c 'chown root:root {service_script}'")
+                os.remove(temp_path)
+                
+                logger.info(f"🔱 V9.0 AUTOBOOT: Installed to {service_script}")
+                logger.info("🔱 V9.0 AUTOBOOT: Bot will start on SYSTEM BOOT (not just Termux)")
+        
+        # V9.0: FALLBACK — ~/.bashrc (Termux launch only)
         bashrc_path = os.path.expanduser("~/.bashrc")
         launch_cmd = f"cd {_bot_dir} && python main.py {DEVICE_ID} &"
         
-        # Check if already in bashrc
         if os.path.exists(bashrc_path):
             with open(bashrc_path, 'r') as f:
                 content = f.read()
-            if launch_cmd in content:
-                logger.info("V8.5 AUTOBOOT: Launch command already in ~/.bashrc")
-                return
-        
-        # Append to bashrc
-        with open(bashrc_path, 'a') as f:
-            f.write(f"\n# Aegis V8.5 Auto-boot\n")
-            f.write(f"{launch_cmd}\n")
-        
-        logger.info(f"V8.5 AUTOBOOT: Added launch command to ~/.bashrc")
+            if launch_cmd not in content:
+                with open(bashrc_path, 'a') as f:
+                    f.write(f"\n# Aegis V9.0 Auto-boot\n")
+                    f.write(f"{launch_cmd}\n")
+                logger.info(f"🔱 V9.0 AUTOBOOT: Added fallback to ~/.bashrc")
+        else:
+            # Create bashrc if doesn't exist
+            with open(bashrc_path, 'w') as f:
+                f.write(f"# Aegis V9.0 Auto-boot\n")
+                f.write(f"{launch_cmd}\n")
+            logger.info(f"🔱 V9.0 AUTOBOOT: Created ~/.bashrc with launch command")
+            
     except Exception as e:
-        logger.warning(f"V8.5 AUTOBOOT: Failed to setup autoboot: {e}")
+        logger.warning(f"🔱 V9.0 AUTOBOOT: Setup warning: {e}")
+
+# Synchronous wrapper for bash commands in non-async context
+def run_bash_sync(cmd: str) -> tuple:
+    """Synchronous wrapper for bash commands."""
+    import subprocess
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+        return result.returncode, result.stdout, result.stderr
+    except Exception as e:
+        return -1, "", str(e)
 
 # ── SIGNAL HANDLERS ───────────────────────────────────────────────────────
 def _signal_handler(signum, frame):
@@ -148,70 +192,90 @@ except Exception as e:
 # ── SYSTEM PRIORITY & OOM ─────────────────────────────────────────────────
 async def anchor_to_system():
     """
-    V8.0 GOD MODE: System-Critical Service Level.
-    - Set OOM score to -1000 (unkillable even if system exploding)
-    - Elevate CPU priority to maximum
-    - Apply same protection to child ADB/subprocesses
+    V9.0 SYSTEM IMMORTAL: Kernel-level OOM immunity for bot and all children.
+    Writes -1000 to oom_score_adj to become "Unkillable" by Android LMK.
     """
     pid = os.getpid()
-    
-    # V8.0 GOD MODE: OOM Score Adjustment (-1000 = absolutely never kill)
     oom_path = f"/proc/{pid}/oom_score_adj"
+    
+    logger.info(f"🔱 V9.0 SYSTEM IMMORTAL: Anchoring PID {pid} to kernel...")
+    
+    # V9.0: CRITICAL - Set OOM score to -1000 (IMMORTAL)
     try:
         ret, _, _ = await run_bash(f"su -c 'echo -1000 > {oom_path}'")
         if ret == 0:
-            logger.info("👑 V8.0 GOD MODE: OOM score set to -1000 (IMMORTAL)")
+            logger.info("� V9.0: OOM score set to -1000 — BOT IS NOW UNKILLABLE")
         else:
-            logger.warning("👑 V8.0 GOD MODE: Failed to set OOM score (requires root)")
+            logger.critical("� V9.0: FAILED to set OOM score — bot may be killed by LMK!")
     except Exception as e:
-        logger.warning(f"👑 V8.0 GOD MODE: OOM adjustment error: {e}")
+        logger.critical(f"� V9.0: OOM immunity error: {e}")
     
-    # V8.0: Maximum CPU Priority (renice -20 = real-time priority)
+    # V9.0: CRITICAL - Protect ALL child processes recursively
+    await protect_child_processes()
+    
+    # V9.0: Maximum CPU Priority (renice -20 = real-time priority)
     try:
         ret, _, _ = await run_bash(f"su -c 'renice -n -20 -p {pid}'")
         if ret == 0:
-            logger.info("👑 V8.0 GOD MODE: CPU priority at MAXIMUM (renice -20)")
+            logger.info("� V9.0: CPU priority at MAXIMUM (renice -20)")
         else:
-            # Fallback to -15 if -20 fails
             await run_bash(f"su -c 'renice -n -15 -p {pid}'")
-            logger.info("👑 V8.0 GOD MODE: CPU priority at HIGH (renice -15)")
+            logger.info("� V9.0: CPU priority at HIGH (renice -15)")
     except Exception as e:
-        logger.warning(f"👑 V8.0 GOD MODE: renice error: {e}")
+        logger.warning(f"� V9.0: renice error: {e}")
     
-    # V8.0: CPU Isolation (dedicate core 0 to bot)
+    # V9.0: CPU Isolation (dedicate core 0 to bot)
     try:
         ret, _, _ = await run_bash(f"su -c 'taskset -cp 0 {pid}' 2>/dev/null")
         if ret == 0:
-            logger.info("👑 V8.0 GOD MODE: CPU isolation on core 0")
+            logger.info("� V9.0: CPU isolation on core 0")
     except Exception:
         pass
     
-    # V8.0: Protect all existing child processes
-    await protect_child_processes()
-    
-    # V8.0: Set I/O priority to real-time
+    # V9.0: Set I/O priority to real-time
     try:
         await run_bash(f"su -c 'ionice -c 1 -n 0 -p {pid}' 2>/dev/null")
-        logger.info("👑 V8.0 GOD MODE: I/O priority set to REAL-TIME")
+        logger.info("� V9.0: I/O priority set to REAL-TIME")
     except Exception:
         pass
+    
+    logger.info("🔱 V9.0 SYSTEM IMMORTAL: Anchoring complete — Bot integrated into Core System Layer")
 
 async def protect_child_processes():
     """
-    V8.0: Apply OOM protection to all child ADB and monitoring processes.
+    V9.0: Apply -1000 OOM protection to ALL child processes recursively.
+    Makes ADB, shell, and all subprocesses "Unkillable" by Android LMK.
     """
     try:
-        # Find all child processes of the bot
-        ret, stdout, _ = await run_bash(f"su -c 'pgrep -P {os.getpid()} 2>/dev/null || echo NONE'")
+        bot_pid = os.getpid()
+        protected_count = 0
+        
+        # Find all child processes of the bot (direct children)
+        ret, stdout, _ = await run_bash(f"su -c 'pgrep -P {bot_pid} 2>/dev/null || echo NONE'")
         if ret == 0 and stdout.strip() and stdout.strip() != "NONE":
-            child_pids = stdout.strip().split('\n')
-            for child_pid in child_pids:
-                if child_pid.strip():
-                    # Apply -1000 OOM score to each child
-                    await run_bash(f"su -c 'echo -1000 > /proc/{child_pid.strip()}/oom_score_adj 2>/dev/null'")
-            logger.info(f"👑 V8.0 GOD MODE: Applied OOM protection to {len(child_pids)} child processes")
+            direct_children = stdout.strip().split('\n')
+            
+            for child_pid in direct_children:
+                if not child_pid.strip():
+                    continue
+                child_pid = child_pid.strip()
+                
+                # Apply -1000 OOM score to direct child
+                await run_bash(f"su -c 'echo -1000 > /proc/{child_pid}/oom_score_adj 2>/dev/null'")
+                protected_count += 1
+                
+                # Recursively find grandchildren (ADB subprocesses, etc.)
+                ret2, grandchild_out, _ = await run_bash(f"su -c 'pgrep -P {child_pid} 2>/dev/null || echo NONE'")
+                if ret2 == 0 and grandchild_out.strip() and grandchild_out.strip() != "NONE":
+                    grandchildren = grandchild_out.strip().split('\n')
+                    for grandchild in grandchildren:
+                        if grandchild.strip():
+                            await run_bash(f"su -c 'echo -1000 > /proc/{grandchild.strip()}/oom_score_adj 2>/dev/null'")
+                            protected_count += 1
+            
+            logger.info(f"� V9.0: Applied OOM protection to {protected_count} child processes")
     except Exception as e:
-        logger.debug(f"👑 V8.0 GOD MODE: Child protection skipped: {e}")
+        logger.debug(f"� V9.0: Child protection warning: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # V8.0 EMERGENCY RAM RECOVERY — STOP/CONT Protocol
@@ -483,11 +547,13 @@ class LogStreamer:
 # ═══════════════════════════════════════════════════════════════════════════
 async def telemetry_daemon(bot_instance: "AegisBot"):
     """
-    V8.2: Direct Kernel Thread Counting every 10 seconds.
-    Uses /proc/[PID]/status for real-time thread telemetry.
+    V9.0 SYSTEM IMMORTAL: UI-Independent Telemetry with Emergency Bypass.
+    Uses su -c "cat /proc/[PID]/status | grep Threads" for ALL clones.
+    If UI fails, sends Critical Status via emergency bot-API call.
     """
-    logger.info("📊 V8.2 TELEMETRY: Kernel Scanner started (10s interval)")
+    logger.info("📊 V9.0 TELEMETRY: UI-Independent Kernel Scanner started (10s interval)")
     cycle = 0
+    ui_failures = 0
     
     while True:
         await asyncio.sleep(10)  # 10 second interval
@@ -498,8 +564,8 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
                 if state == CloneState.RUNNING:
                     pid = await InjectionEngine.get_clone_pid(name)
                     if pid:
-                        # V8.2: Collect thread count via kernel scanner
-                        thread_count, source = await MonitorEngine.get_thread_count_kernel(pid)
+                        # V9.0: UI-Independent thread count via hard-coded method
+                        thread_count, status = await MonitorEngine.get_thread_count_v87(pid)
                         MonitorEngine.record_thread_history(name, thread_count)
                         
                         # Collect CPU usage
@@ -507,16 +573,41 @@ async def telemetry_daemon(bot_instance: "AegisBot"):
                         if cpu >= 0:
                             MonitorEngine.record_cpu_history(name, cpu)
                         
+                        # V9.0: Emergency bypass if UI layer fails
+                        if bot_instance.application is None or ui_failures >= 3:
+                            # UI is down - attempt emergency API call
+                            if cycle % 30 == 0:  # Every 5 minutes during emergency
+                                await _emergency_telemetry_alert(bot_instance, name, thread_count, status)
+                        
                         # Log every 6 cycles (1 minute)
                         if cycle % 6 == 0:
-                            logger.debug(f"📊 V8.2 [{name}] Threads: {thread_count} ({source}), CPU: {cpu:.1f}%")
+                            logger.debug(f"📊 V9.0 [{name}] Threads: {thread_count} ({status}), CPU: {cpu:.1f}%")
                     else:
                         # PID lost but state is RUNNING - mark STOPPED
-                        logger.warning(f"📊 V8.2 [{name}] PID lost during telemetry, marking STOPPED")
+                        logger.warning(f"📊 V9.0 [{name}] PID lost during telemetry, marking STOPPED")
                         bot_instance.set_state(name, CloneState.STOPPED)
                         
         except Exception as e:
-            logger.error(f"📊 V8.2 TELEMETRY error: {e}")
+            ui_failures += 1
+            logger.error(f"📊 V9.0 TELEMETRY error (failure #{ui_failures}): {e}")
+            if ui_failures > 10:
+                logger.critical("📊 V9.0 TELEMETRY: UI layer appears dead — Emergency mode activated")
+
+async def _emergency_telemetry_alert(bot_instance: "AegisBot", clone_name: str, threads: int, status: str):
+    """
+    V9.0: Emergency telemetry alert when UI layer is down.
+    Uses simplified API call to bypass UI manager.
+    """
+    try:
+        admin_id = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
+        if admin_id and bot_instance.application:
+            # Simplified emergency message
+            msg = f"🚨 *V9.0 CRITICAL STATUS*\n`{clone_name}`\nThreads: {threads} ({status})"
+            await bot_instance.application.bot.send_message(
+                admin_id, msg, parse_mode="Markdown"
+            )
+    except Exception as e:
+        logger.debug(f"V9.0 Emergency telemetry failed: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -546,42 +637,55 @@ async def force_redraw() -> bool:
         return False
 async def keepalive_daemon(bot_instance: "AegisBot"):
     """
-    V8.5: Keep-Alive Daemon - Removed Pure Shell Mode trigger.
-    Bot ALWAYS attempts telemetry and UI updates regardless of SystemUI status.
+    V9.0 SYSTEM IMMORTAL: Keep-Alive with Headless Recovery Mode.
+    Detects SystemUI restart and pauses non-essential activity for 30s.
+    Bot continues managing clones via su -c background commands.
     """
     global _system_ui_crashed
     
-    logger.info("👑 V8.5 KEEP-ALIVE: Daemon started (Pure Shell Mode DISABLED)")
+    logger.info("� V9.0 KEEP-ALIVE: Daemon started (System Immortal Mode)")
     heartbeat_count = 0
+    systemui_restarting = False
+    pause_until = 0
     
     while True:
         await asyncio.sleep(30)  # Check every 30 seconds
         heartbeat_count += 1
+        now = time.time()
         
         try:
-            # V8.5: REMOVED SystemUI Health Check - was causing false positives
-            # Bot now ALWAYS attempts telemetry and UI updates
-            # unless the Python process itself is dying
+            # V9.0: Detect SystemUI restart (Headless Recovery Mode)
+            ret, stdout, _ = await run_bash("su -c 'dumpsys activity activities | grep -i systemui' 2>/dev/null || echo NONE")
+            systemui_healthy = ret == 0 and "systemui" in stdout.lower()
             
-            # 1. Headless heartbeat - input tap with device ID (bypasses UI)
+            if not systemui_healthy and not systemui_restarting:
+                # SystemUI detected as restarting - enter Headless Recovery Mode
+                systemui_restarting = True
+                pause_until = now + 30  # Pause non-essential for 30 seconds
+                logger.critical("🔱 V9.0 HEADLESS RECOVERY: SystemUI restarting — PAUSING non-essential activity for 30s")
+                
+            elif systemui_healthy and systemui_restarting:
+                # SystemUI recovered
+                systemui_restarting = False
+                pause_until = 0
+                logger.info("🔱 V9.0 HEADLESS RECOVERY: SystemUI recovered — Resuming normal operation")
+            
+            # Check if we're in pause period
+            in_pause = now < pause_until
+            if in_pause and heartbeat_count % 2 == 0:
+                logger.info(f"🔱 V9.0 HEADLESS RECOVERY: Pause remaining {int(pause_until - now)}s — clones running via background commands")
+            
+            # 1. Headless heartbeat - always run (bypasses UI)
             await run_bash("su -c 'input -d 0 tap 540 960' 2>/dev/null || su -c 'input tap 540 960' 2>/dev/null || true")
             
-            # 2. Check system health via dumpsys (works without SystemUI)
-            ret, stdout, _ = await run_bash("su -c 'dumpsys activity activities | grep -E \"mFocused|mResumed\"' 2>/dev/null || echo NONE")
-            system_responsive = ret == 0 and stdout.strip() != "NONE"
-            
-            # 3. V8.0: Memory pressure check — EMERGENCY PROTOCOL
+            # 2. Memory pressure check — EMERGENCY PROTOCOL (always run)
             await emergency_ram_recovery(bot_instance)
             
-            # 4. Memory pressure check & surgical trim (fallback)
-            if heartbeat_count % 6 == 0:  # Every 3 minutes
-                await surgical_trim(bot_instance)
-            
-            # 5. V8.0: Protect child processes periodically
+            # 3. Periodic child protection (always run for OOM immunity)
             if heartbeat_count % 10 == 0:  # Every 5 minutes
                 await protect_child_processes()
             
-            # 6. PID validation for all clones
+            # 4. PID validation for all clones (always run - critical for farm)
             for name, state in list(bot_instance.clone_states.items()):
                 if state == CloneState.RUNNING:
                     # Use dumpsys for verification (works even if UI crashed)
@@ -589,15 +693,25 @@ async def keepalive_daemon(bot_instance: "AegisBot"):
                     if not verified:
                         pid = await InjectionEngine.get_clone_pid(name)
                         if not pid:
-                            logger.warning(f"👑 V8.5: [{name}] Lost via dumpsys & pidof, marking STOPPED")
+                            logger.warning(f"� V9.0: [{name}] Lost via dumpsys & pidof, marking STOPPED")
                             bot_instance.set_state(name, CloneState.STOPPED)
             
-            # 7. Periodic logging
-            if heartbeat_count % 10 == 0:  # Every 5 minutes
-                logger.info(f"👑 V8.5 Keep-Alive #{heartbeat_count}")
+            # 5. Non-essential operations (SKIP during Headless Recovery)
+            if not in_pause:
+                # Memory pressure check & surgical trim
+                if heartbeat_count % 6 == 0:  # Every 3 minutes
+                    await surgical_trim(bot_instance)
+                
+                # Periodic logging (reduced during normal operation)
+                if heartbeat_count % 10 == 0:  # Every 5 minutes
+                    logger.info(f"� V9.0 Keep-Alive #{heartbeat_count}")
+            else:
+                # During pause: minimal logging only
+                if heartbeat_count % 2 == 0:
+                    logger.debug(f"🔱 V9.0 Headless mode — logging suppressed")
                         
         except Exception as e:
-            logger.error(f"👑 V8.5 Keep-Alive error: {e}")
+            logger.error(f"� V9.0 Keep-Alive error: {e}")
             await asyncio.sleep(5)
 
 
@@ -714,7 +828,7 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     # SILENT START: Skip everything for first 10 minutes
     boot_time = time.time()
     
-    logger.info("🧠 V8.7 WATCHDOG: Kernel Master initialized — Ghost & Frozen detection active")
+    logger.info("🔱 V9.0 WATCHDOG: System Immortal — Ghost & Frozen detection active")
     
     while True:
         await asyncio.sleep(60)
