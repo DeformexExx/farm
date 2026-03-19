@@ -16,15 +16,13 @@ class InjectionEngine:
     
     @staticmethod
     async def get_clone_pid(clone_name: str) -> str:
-        """V11.0: Robust PID Hunter — ps | grep | awk"""
-        # User Directive: su -c "ps -A | grep -i 'com.roblox.clien' | grep '{suffix}' | awk '{{print $2}}'"
-        # We assume clone_name is the suffix (e.g. 'clienb') or contains it.
-        # Direct match on the full package name is most robust.
-        package = f"com.roblox.{clone_name}"
-        cmd = f"su -c \"ps -A | grep -i '{package}' | grep -v grep | awk '{{print $2}}'\""
+        """V11.1: Absolute PID Hunter — Precise ps-grep for ugPhone kernel"""
+        # User Directive: ps -A | grep -i "com.roblox.clien{suffix}" | awk '{print $2}'
+        # clone_name is the suffix (e.g. 'clienb')
+        cmd = f"su -c \"ps -A | grep -i 'com.roblox.{clone_name}' | grep -v grep | awk '{{print $2}}'\""
         ret, stdout, _ = run_bash(cmd)
+        
         if ret == 0 and stdout.strip():
-            # In case multiple PIDs found (unlikely), take the last one (usually newest)
             pids = stdout.strip().split()
             if pids:
                 return pids[-1]
