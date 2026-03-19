@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui_manager.py — Project Aegis V10.0 Kernel Auto-Root & Persistence
+# ui_manager.py — Project Aegis V4.0 Dark Premium
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -22,9 +22,9 @@ class UIManager:
     @staticmethod
     def get_welcome_text(device_id: str) -> str:
         return (
-            "💎 *AEGIS OVERLORD V10.0*\n"
+            "💎 *AEGIS OVERLORD V5.0*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡️ SYSTEM : `[🔱 KERNEL AUTO-ROOT]`\n"
+            f"⚡️ SYSTEM : `[💠 ONLINE (SAFE)]`\n"
             f"📱 DEVICE : `{device_id}`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -41,18 +41,15 @@ class UIManager:
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
         return (
-            "💎 *AEGIS V10.0 — KERNEL AUTO-ROOT*\n"
+            "💎 *AEGIS V4.0 — DEVICE*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
-            f"🔱 IMMORTAL: `[OOM -1000 | VERIFIED]`\n"
-            f"👻 GHOST   : `[ANCHOR DAEMON ACTIVE]`\n"
-            f"🧠 KERNEL  : `[AUTO-HARDEN ON BOOT]`\n"
-            f"⚡️ STATUS  : `[BASHRC INJECTOR READY]`\n"
+            f"🐕 WATCHDOG: `[STATE-GATED 🔒]`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "🔱 _Zero-touch after reboot. Self-healing OOM protection._"
+            "✨ _State Machine Active_"
         )
 
     @staticmethod
@@ -71,7 +68,6 @@ class UIManager:
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(f"📟 CONSOLE: {c}",      callback_data="toggle_console")],
             [InlineKeyboardButton(f"🔄 AUTO-RESTORE: {r}", callback_data="toggle_restore")],
-            [InlineKeyboardButton("🔄 FORCE REDRAW",     callback_data="sys_force_redraw")],
             [InlineKeyboardButton("❓ HELP",                callback_data="sys_help")],
             [InlineKeyboardButton("🏠 BACK",               callback_data="nav_home")],
         ])
@@ -83,7 +79,7 @@ class UIManager:
         state_map:  {clone_name: CloneState (str value)}
         uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *AEGIS OVERLORD V10.0 KERNEL AUTO-ROOT*\n"
+        msg = "💎 *AEGIS OVERLORD V4.0*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
@@ -110,12 +106,9 @@ class UIManager:
             else:
                 uptime = "—"
 
-            # V11.1 -> V12.0: CPU display instead of Threads
-            cpu_val = state_map.get(f"{name}:threads", "")
-            if cpu_val and (isinstance(cpu_val, float) or cpu_val.replace('.','',1).isdigit()):
-                thr_line = f"🧵 CPU: `{cpu_val}%`"
-            else:
-                thr_line = "🧵 CPU: `—`"
+            # Thread info (from status_map, optional)
+            thr_info = state_map.get(f"{name}:threads", "")
+            thr_line = f"🧵 Threads: `{thr_info}`" if thr_info else "🧵 Threads: `—`"
 
             msg += (
                 f"[🎮 *{name.upper()}*]\n"
@@ -170,16 +163,10 @@ class UIManager:
     @staticmethod
     def get_help_text() -> str:
         return (
-            "🔱 *AEGIS V10.0 KERNEL AUTO-ROOT — SYSTEM IMMORTAL*\n\n"
-            "• Auto-Harden: *su -c 'echo -1000 > /proc/self/oom_score_adj'*\n"
-            "• Verification: *Reads back OOM score after write*\n"
-            "• Auto-Injector: *Checks ~/.bashrc every run*\n"
-            "• Daemon Protection: *All clones get OOM -1000*\n"
-            "• Headless Sight: *[ROOT_PENDING...] when su pending*\n"
-            "• Ghost Process: *1 thread for 5min = kill -9 + relaunch*\n"
-            "• Frozen Detection: *<80 threads for 3min = FROZEN*\n"
-            "• Remote Console: `/exec [command]` — Emergency shell access\n"
-            "• Hot Reload: `/update` — Git pull & auto-restart\n"
-            "• OOM Protection: *-1000 score (IMMORTAL)*\n\n"
-            "_V10.0: Zero-touch automation. Survives any reboot._"
+            "🛡 *AEGIS V5.0 SAFE MODE*\n\n"
+            "• Watchdog: *Silent* for 10 mins after boot\n"
+            "• Startup: Set Identity -> Inject -> Launch (No Cleanup)\n"
+            "• UI Refresh: Throttled to 60s gap\n"
+            "• Locking: Serialized startup active\n\n"
+            "Stable logic: No aggressive kills or background interference."
         )
