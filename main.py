@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V5.2 Liquid Glass Edition
+# main.py — Project Aegis V5.3 Liquid Glass Edition
 import os
 import sys
 import enum
@@ -7,6 +7,7 @@ import asyncio
 import logging
 import time
 import tempfile
+import re
 from typing import Optional, Dict
 
 # ── ABSOLUTE PATH LOCK ─────────────────────────────────────────────────────
@@ -14,7 +15,7 @@ _bot_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(_bot_dir)
 sys.path.insert(0, _bot_dir)
 
-from telegram import Update
+from telegram import Update, Message
 from telegram.ext import (
     ApplicationBuilder, Application, CommandHandler,
     ContextTypes, MessageHandler, filters, CallbackQueryHandler
@@ -31,7 +32,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "5.2"
+VERSION = "5.3"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -61,52 +62,19 @@ class CloneState(str, enum.Enum):
     STARTING = "STARTING"  # 1/4 - 4/4 + 300s grace window
     RUNNING  = "RUNNING"   # Fully online, monitored by Watchdog
 
-# ═══════════════════════════════════════════════════════════════════════════
-# LOG STREAMER
-# ═══════════════════════════════════════════════════════════════════════════
 class TelegramLogHandler(logging.Handler):
-    def __init__(self, streamer):
+    def __init__(self, bot: "AegisBot"):
         super().__init__()
-        self.streamer = streamer
+        self.bot = bot
     def emit(self, record):
-        self.streamer.add_line(f"[{record.levelname[:3]}] {self.format(record)}")
+        asyncio.create_task(self.bot.add_log_line(f"[{record.levelname[:3]}] {self.format(record)}"))
 
 
-class LogStreamer:
-    def __init__(self, bot, chat_id: int):
-        self.bot      = bot
-        self.chat_id  = chat_id
-        self.buffer   = []
-        self._running = False
-
-    def add_line(self, text: str):
-        self.buffer.append(text)
-
-    async def start(self):
-        self._running = True
-        while self._running:
-            await asyncio.sleep(2)
-            if self.buffer:
-                batch = "\n".join(self.buffer[-30:])
-                self.buffer.clear()
-                try:
-                    await self.bot.send_message(self.chat_id, f"<code>{batch}</code>", parse_mode="HTML")
-                except Exception:
-                    pass
-
-    def stop(self):
-        self._running = False
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# WATCHDOG — state-gated: only monitors RUNNING clones
-# ═══════════════════════════════════════════════════════════════════════════
 async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
     """
     CRITICAL RULE: Watchdog is LEGALLY BLIND to any clone not in RUNNING state.
     Only RUNNING clones are checked for Frozen/Leaking conditions.
     """
-    import re
 
     offline_strikes: Dict[str, int]   = {}
     last_action:     Dict[str, float] = {}
@@ -219,14 +187,18 @@ class AegisBot:
         self.config      = ConfigManager(DEVICE_ID, FARM_DIR)
         self.persistence = PersistenceManager(FARM_DIR)
         self.application: Optional[Application] = None
-        self._dash_msg   = None
-        self._streamer   = None
-        self._log_handler = None
+        self._dash_msg: Optional[Message] = None
+        self._log_handler: Optional[logging.Handler] = None
         self._console_on: bool = self.persistence.console_mode
         self._last_ui_update: float = 0.0
 
+        # ── CONSOLE BUFFER (V5.3) ──────────────────────────────────────────
+        self.console_buffer: list[str] = []
+        self.last_console_flush: float = 0.0
+        self.console_lock = asyncio.Lock()
+        self._console_task: Optional[asyncio.Task] = None
+
         # ── STATE MACHINE ─────────────────────────────────────────────────
-        # {clone_name: CloneState}
         self.clone_states: Dict[str, CloneState] = {}
 
         # ── MAINTENANCE ───────────────────────────────────────────────────
@@ -509,9 +481,10 @@ class AegisBot:
             self.set_state(name, CloneState.STARTING)
             
             sm = None
-            if chat_id and self.application:
+            app = self.application
+            if chat_id and app:
                 try:
-                    sm = await self.application.bot.send_message(
+                    sm = await app.bot.send_message(
                         chat_id, f"🚀 `{name}`: Запуск...", parse_mode="Markdown")
                 except Exception:
                     pass
@@ -538,9 +511,10 @@ class AegisBot:
         for idx, c in enumerate(clones, 1):
             name = c.get("name")
             if not name: continue
-            if chat_id and self.application:
+            app = self.application
+            if chat_id and app:
                 try:
-                    await self.application.bot.send_message(
+                    await app.bot.send_message(
                         chat_id,
                         f"🚀 *Queue [{idx}/{len(clones)}]*: `{name}`",
                         parse_mode="Markdown"
@@ -557,9 +531,10 @@ class AegisBot:
         self.set_state(name, CloneState.STOPPED)
         self.persistence.remove_target(name)
         await InjectionEngine.stop(name)
-        if chat_id and self.application:
+        app = self.application
+        if chat_id and app:
             try:
-                await self.application.bot.send_message(
+                await app.bot.send_message(
                     chat_id, f"🌑 `{name}` stopped.", parse_mode="Markdown")
             except Exception:
                 pass
@@ -581,9 +556,10 @@ class AegisBot:
         if not targets:
             return
         admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
-        if admin_id and self.application:
+        app = self.application
+        if admin_id and app:
             try:
-                await self.application.bot.send_message(
+                await app.bot.send_message(
                     admin_id,
                     f"♻️ *Auto-Resume*\nQueuing: `{', '.join(targets)}`",
                     parse_mode="Markdown"
@@ -596,20 +572,71 @@ class AegisBot:
     # ─────────────────────────────────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────────────────────────────────
+    # ── CONSOLE BATCHER (V5.3) ───────────────────────────────────────────
+    async def add_log_line(self, line: str):
+        async with self.console_lock:
+            self.console_buffer.append(line)
+            # Threshold check: 15 lines OR 3.5s elapsed
+            if len(self.console_buffer) >= 15 or (time.time() - self.last_console_flush > 3.5):
+                admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
+                if admin_id:
+                    asyncio.create_task(self.flush_console_buffer(admin_id))
+
+    async def flush_console_buffer(self, chat_id: int):
+        async with self.console_lock:
+            if not self.console_buffer: return
+            raw_batch = "\n".join(self.console_buffer)
+            batch_str = str(raw_batch)
+            if len(batch_str) > 4000: 
+                batch_str = batch_str[:3900] + "\n[TRUNCATED...]"
+            self.console_buffer.clear()
+            self.last_console_flush = time.time()
+
+        app = self.application
+        if app:
+            try:
+                await app.bot.send_message(chat_id, f"<code>{batch_str}</code>", parse_mode="HTML")
+            except TelegramError as e:
+                if "retry after" in str(e).lower():
+                    wait = 5
+                    match = re.search(r'after (\d+)', str(e))
+                    if match: wait = int(match.group(1))
+                    logger.warning(f"Flood control: waiting {wait}s...")
+                    await asyncio.sleep(wait)
+                    try:
+                        await app.bot.send_message(chat_id, f"<code>{batch_str}</code>", parse_mode="HTML")
+                    except Exception as e2:
+                        logger.error(f"Retry failed: {e2}")
+                        with open(BOOT_LOG, "a") as f:
+                            f.write(f"\n[429 LOST] {str(batch_str)[:100]}...\n")
+                else:
+                    logger.error(f"Console send error: {e}")
+
+    async def _console_auto_flush_loop(self, chat_id: int):
+        """Emergency flush every 4s if buffer is not empty."""
+        while self._console_on:
+            await asyncio.sleep(4)
+            if self.console_buffer:
+                await self.flush_console_buffer(chat_id)
+
     async def _toggle_console(self, context, chat_id: int):
         self._console_on = not self._console_on
         if self._console_on:
-            self._streamer    = LogStreamer(context.bot, chat_id)
-            self._log_handler = TelegramLogHandler(self._streamer)
-            logging.getLogger().addHandler(self._log_handler)
-            asyncio.create_task(self._streamer.start())
+            hdlr = TelegramLogHandler(self)
+            self._log_handler = hdlr
+            logging.getLogger().addHandler(hdlr)
+            self._console_task = asyncio.create_task(self._console_auto_flush_loop(chat_id))
+            logger.info("📟 Console Stream: ON (Batched)")
         else:
-            if self._log_handler:
-                logging.getLogger().removeHandler(self._log_handler)
+            hdlr_to_rem = self._log_handler
+            if hdlr_to_rem:
+                logging.getLogger().removeHandler(hdlr_to_rem)
                 self._log_handler = None
-            if self._streamer:
-                self._streamer.stop()
-                self._streamer = None
+            task = self._console_task
+            if task:
+                task.cancel()
+                self._console_task = None
+            logger.info("📟 Console Stream: OFF")
 
     async def _take_screenshot(self, message):
         buf = "/data/local/tmp/aegis_shot.png"
