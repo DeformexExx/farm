@@ -567,38 +567,39 @@ class AegisBot:
     # ─────────────────────────────────────────────────────────────────────
     async def _auto_resume(self):
         """
-        Read config clones_data, enqueue all clones whose
-        expected state is RUNNING.
+        V5.7 Smart Auto-Resume: Check PIDs first, then staggered boot.
         """
-        await asyncio.sleep(5)
-        targets = [
-            c.get("name") for c in self.config.clones_data
-            if c.get("status") == "RUNNING" and c.get("name")
-        ]
-        if not targets:
-            return
+        await asyncio.sleep(10) # Initial wait for root/network
         admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
         app = self.application
-        if admin_id and app:
-            try:
-                await app.bot.send_message(
-                    admin_id,
-                    f"♻️ *Auto-Resume*\nQueuing: `{', '.join(targets)}`",
-                    parse_mode="Markdown"
-                )
-            except Exception:
-                pass
-        for n in targets:
-            await self._enqueue_start(n, admin_id)
+        
+        for clone in self.config.clones_data:
+            name = clone.get("name")
+            expected = clone.get("status", "STOPPED").upper()
+            if not name: continue
+            
+            # 1. System Check (V5.7 awk chain)
+            status_str = await MonitorEngine.get_clone_status(name)
+            if "Offline" not in status_str:
+                logger.info(f"Auto-Resume: {name} already running. Attaching...")
+                self.set_state(name, CloneState.RUNNING)
+                continue
+                
+            # 2. Boot Enqueue (20s Stagger)
+            if expected in ("RUNNING", "IDLE"):
+                logger.warning(f"Auto-Resume: {name} expected {expected} but offline. Starting in 20s...")
+                asyncio.create_task(self._enqueue_start(name, admin_id))
+                await asyncio.sleep(20) # V5.7 Stagger
 
     # ─────────────────────────────────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────────────────────────────────
-    # ── CONSOLE BATCHER (V5.6 Turbo) ─────────────────────────────────────
+    # ── CONSOLE BATCHER (V5.7 Turbo 2.0) ──────────────────────────────────
     async def add_log_line(self, line: str):
         await self.console_queue.put(line)
-        # V5.6 Priority: If ERROR is in line, trigger immediate flush
-        if "ERROR" in line.upper():
+        # V5.7 Priority: Flush immediately on ERROR, CRITICAL, or SUCCESS
+        lu = line.upper()
+        if any(k in lu for k in ("ERROR", "CRITICAL", "SUCCESS")):
             admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
             if admin_id:
                 asyncio.create_task(self.flush_console_buffer(admin_id))
@@ -636,18 +637,14 @@ class AegisBot:
                     logger.error(f"Console send error: {e}")
 
     async def _console_auto_flush_loop(self, chat_id: int):
-        """Adaptive flush: 500 chars or 1.5s or ERROR priority."""
+        """Adaptive flush (V5.7): 10 lines or 1.5s."""
         while self._console_on:
             await asyncio.sleep(0.5) 
             
             qsize = self.console_queue.qsize()
             elapsed = time.time() - self.last_console_flush
             
-            # Priority check for ERROR (V5.6)
-            # This is hard to do without popping, so let's just 
-            # assume if there's anything, we check if we should flush.
             if qsize > 0:
-                # If we have many lines or 1.5s passed, flush
                 if qsize >= 10 or elapsed >= 1.5:
                     await self.flush_console_buffer(chat_id)
 
@@ -684,24 +681,27 @@ class AegisBot:
             await message.reply_text(f"❌ Screenshot Exception: {e}")
 
     async def _git_sync(self, chat_id: int):
-        await self.add_log_line("📦 Git Sync (V5.6 Native Stable)...")
+        await self.add_log_line("📦 KERNEL SIGHT: Hard Update sequence start...")
         try:
-            # V5.6 Reset sequence
+            # V5.7 Hard Reset
             await run_bash('su -c "chmod -R 777 ."')
             await run_bash("git fetch --all")
-            ret, out, err = await run_bash("git reset --hard origin/main")
+            await run_bash("git reset --hard origin/main")
             
-            result = (out or err or "(no output)")[:3000]
+            # V5.7 Purge Cache & Reinstall
+            await run_bash('find . -type d -name "__pycache__" -exec rm -rf {} +')
+            await run_bash("pip install -r requirements.txt")
+            
             if chat_id and self.application:
                 await self.application.bot.send_message(
-                    chat_id, f"✅ *Sync & Reset Complete*\n```\n{result}\n```\nRebooting...", parse_mode="Markdown")
+                    chat_id, "✅ *Hard Update Complete*. Purged __pycache__. Rebooting...", parse_mode="Markdown")
             
             await asyncio.sleep(2)
             os.execv(sys.executable, ['python'] + sys.argv)
         except Exception as e:
-            logger.error(f"git_sync error: {e}")
+            logger.error(f"V5.7 Update Error: {e}")
             if chat_id and self.application:
-                await self.application.bot.send_message(chat_id, f"❌ Sync failed: {e}")
+                await self.application.bot.send_message(chat_id, f"❌ Update failed: {e}")
 
     # ── MAINTENANCE CYCLE ────────────────────────────────────────────────
     async def run_maintenance_cycle(self, chat_id: Optional[int] = None):
@@ -807,21 +807,12 @@ class AegisBot:
         # 5b. Launch Maintenance Timer
         asyncio.create_task(self._maint_timer_loop())
 
-        # 6. Auto-resume
+        # 6. Auto-resume (V5.7 Smart sequence)
         asyncio.create_task(self._auto_resume())
 
         logger.info(f"💎 PROJECT AEGIS V{VERSION} ONLINE — {DEVICE_ID}")
 
-        # 7. Auto-Boot (V5.6)
-        admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
-        for clone in self.config.clones_data:
-            c_name = clone.get("name")
-            c_status = clone.get("status", "STOPPED").upper()
-            if c_status in ("RUNNING", "IDLE") and c_name:
-                logger.info(f"Auto-Boot: Enqueueing {c_name}...")
-                asyncio.create_task(self._enqueue_start(c_name, admin_id))
-
-        # 8. Poll
+        # 7. Poll
         await app.updater.start_polling(drop_pending_updates=True)
 
         # 8. Block

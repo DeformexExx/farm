@@ -177,11 +177,11 @@ class UIManager:
     @staticmethod
     def get_clone_submenu(name: str, state: Any) -> InlineKeyboardMarkup:
         """Individual clone control keyboard."""
-        # Fix Enum vs str bug (V5.6 Native Sight)
+        # Fix Enum vs str bug (V5.7 Reconstruction)
         state_str = str(state.value if hasattr(state, 'value') else state).upper()
         
         rows = []
-        if state_str in ("STOPPED", "COOLDOWN"):
+        if state_str in ("STOPPED", "COOLDOWN", "OFFLINE"):
             rows.append([InlineKeyboardButton("⚡️ Start",    callback_data=f"start_{name}")])
         elif state_str == "RUNNING":
             rows.append([InlineKeyboardButton("❄️ Stop",     callback_data=f"stop_{name}")])

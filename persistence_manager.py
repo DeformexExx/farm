@@ -57,6 +57,10 @@ class PersistenceManager:
     # ──────────────────────────────────────────────────────────────────────
     def save(self):
         try:
+            # V5.7: Final check to ensure all states are strings (UPPER)
+            for k, v in list(self.target_states.items()):
+                self.target_states[k] = str(v.value if hasattr(v, 'value') else v).upper()
+
             payload = {
                 "auto_restore":  self.auto_restore,
                 "console_mode":  self.console_mode,
@@ -71,6 +75,8 @@ class PersistenceManager:
             logger.error(f"PersistenceManager.save(): {e}")
 
     # ──────────────────────────────────────────────────────────────────────
+
+
     def add_target(self, name: str, target_state: str = "RUNNING"):
         self.targets[name] = True
         self.target_states[name] = target_state
