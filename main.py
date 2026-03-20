@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-# main.py — Project Aegis V4.0 State Machine Edition
+# main.py — Project Aegis V5.2 Liquid Glass Edition
 import os
 import sys
 import enum
 import asyncio
 import logging
 import time
+import tempfile
 from typing import Optional, Dict
 
 # ── ABSOLUTE PATH LOCK ─────────────────────────────────────────────────────
@@ -30,7 +31,7 @@ from persistence_manager import PersistenceManager
 # ═══════════════════════════════════════════════════════════════════════════
 # VERSION
 # ═══════════════════════════════════════════════════════════════════════════
-VERSION = "5.0"
+VERSION = "5.2"
 
 # ── DEVICE ID ──────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
@@ -109,6 +110,7 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
 
     offline_strikes: Dict[str, int]   = {}
     last_action:     Dict[str, float] = {}
+    cpu_zeros:       Dict[str, int]   = {}
 
     # SILENT START: Skip everything for first 10 minutes
     boot_time = time.time()
@@ -124,10 +126,10 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
             now = time.time()
 
             for name, state in list(bot_instance.clone_states.items()):
+                if ":" in name: continue # skip meta fields
 
                 # ══ STATE GATE — The core fix ══════════════════════════════
                 if state != CloneState.RUNNING:
-                    # Log why we're skipping
                     if state == CloneState.STARTING:
                         logger.debug(f"Watchdog: [{name}] STARTING — ignored.")
                     continue
@@ -143,6 +145,7 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
 
                 if "Offline" in st:
                     offline_strikes[name] = offline_strikes.get(name, 0) + 1
+                    bot_instance.clone_states[f"{name}:status"] = "Offline"
                     if offline_strikes[name] >= 3:
                         reason       = f"Offline ×{offline_strikes[name]}"
                         needs_action = True
@@ -150,34 +153,57 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                         logger.info(f"Watchdog [{name}]: Offline strike {offline_strikes[name]}/3")
                 else:
                     offline_strikes[name] = 0
-                    m = re.search(r"Thr:\s*(\d+)", st)
-                    if m:
-                        thr = int(m.group(1))
-                        if thr < 130:
-                            reason       = f"Frozen (Thr:{thr})"
-                            needs_action = True
-                        elif thr > 500:
-                            reason       = f"Leaking (Thr:{thr})"
-                            needs_action = True
+                    
+                    m_thr = re.search(r"Thr:\s*(\d+)", st)
+                    thr = int(m_thr.group(1)) if m_thr else 0
+                    bot_instance.clone_states[f"{name}:threads"] = str(thr)
+                    
+                    m_cpu = re.search(r"CpuTicks:\s*(\d+)", st)
+                    cpu_ticks = m_cpu.group(1) if m_cpu else "0"
+                    
+                    last_ticks = getattr(bot_instance, f"_cpu_ticks_{name}", "0")
+                    setattr(bot_instance, f"_cpu_ticks_{name}", cpu_ticks)
+                    
+                    if cpu_ticks == last_ticks and cpu_ticks != "0":
+                        cpu_zeros[name] = cpu_zeros.get(name, 0) + 1
+                    else:
+                        cpu_zeros[name] = 0
+                        
+                    if thr < 100:
+                        reason       = f"Frozen (Thr:{thr}<100)"
+                        needs_action = True
+                    elif cpu_zeros.get(name, 0) >= 2:
+                        reason       = f"Lagging (CPU 0% for 120s)"
+                        needs_action = True
+                        cpu_zeros[name] = 0
+                    elif thr > 500:
+                        reason       = f"Leaking (Thr:{thr})"
+                        needs_action = True
+
+                    if needs_action:
+                        bot_instance.clone_states[f"{name}:status"] = "Lagging"
+                        bot_instance.config.update_clone_status(name, "Lagging")
+                    else:
+                        bot_instance.clone_states[f"{name}:status"] = "Stable"
 
                 if needs_action:
                     last_action[name]       = now
                     offline_strikes[name]   = 0
-                    # Transition back to STOPPED first
                     bot_instance.set_state(name, CloneState.STOPPED)
-                    logger.warning(f"Watchdog: [{name}] {reason}. Queueing restart…")
+                    
+                    logger.warning(f"Watchdog: [{name}] {reason}. Queueing purge restart…")
                     admin = bot_instance.config.admin_ids[0] if bot_instance.config.admin_ids else None
                     if admin:
                         try:
                             await application.bot.send_message(
                                 admin,
-                                f"🐕 *Watchdog*: `{name}` → {reason}\n🌑 STOPPED → queued relaunch…",
+                                f"🐕 *Watchdog*: `{name}` → {reason}\n🧹 PURGE & RELAUNCH queued…",
                                 parse_mode="Markdown"
                             )
                         except TelegramError:
                             pass
                     # Kick into startup queue via background task
-                    asyncio.create_task(bot_instance._enqueue_start(name, admin))
+                    asyncio.create_task(bot_instance._purge_restart(name, admin))
 
             await bot_instance.refresh_dashboard()
 
@@ -223,6 +249,7 @@ class AegisBot:
 
     # ── State helpers ─────────────────────────────────────────────────────
     def set_state(self, name: str, state: CloneState):
+        if ":" in name: return
         old = self.clone_states.get(name, CloneState.STOPPED)
         self.clone_states[name] = state
         if state == CloneState.RUNNING:
@@ -230,6 +257,8 @@ class AegisBot:
         elif old == CloneState.RUNNING:
             self.running_since.pop(name, None)
         logger.info(f"State [{name}]: {old.value} → {state.value}")
+        if state in [CloneState.RUNNING, CloneState.STOPPED]:
+            self.config.update_clone_status(name, state.value)
 
     # ── Admin guard ───────────────────────────────────────────────────────
     async def _is_admin(self, uid: int) -> bool:
@@ -259,6 +288,42 @@ class AegisBot:
             await update.message.reply_text(f"```\n{tail}\n```", parse_mode="Markdown")
         except Exception as e:
             await update.message.reply_text(f"❌ Console error: {e}")
+
+    async def _purge_restart(self, name: str, chat_id):
+        await run_bash(f"su -c 'am force-stop com.roblox.{name}'")
+        await run_bash(f"su -c 'rm -rf /data/data/com.roblox.{name}/cache/*'")
+        await run_bash(f"su -c 'rm -rf /data/data/com.roblox.{name}/code_cache/*'")
+        await self._enqueue_start(name, chat_id)
+
+    async def cmd_exec(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self._is_admin(update.effective_user.id): return
+        cmd = update.message.text[len("/exec "):].strip()
+        if not cmd:
+            await update.message.reply_text("Usage: /exec <command>")
+            return
+        ret, out, err = await run_bash(cmd)
+        res = (out + "\n" + err).strip()
+        if not res: res = "(no output)"
+        if len(res) > 3900:
+            fd, path = tempfile.mkstemp(suffix=".txt")
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(res)
+            with open(path, 'rb') as f:
+                await update.message.reply_document(f, filename="exec_output.txt")
+            os.remove(path)
+        else:
+            await update.message.reply_text(f"```bash\n{res}\n```", parse_mode="Markdown")
+
+    async def cmd_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self._is_admin(update.effective_user.id): return
+        msg = await update.message.reply_text("🔄 Updating system (git pull)...")
+        ret, out, err = await run_bash(f"git -C {_bot_dir} pull")
+        req_path = os.path.join(_bot_dir, "requirements.txt")
+        if os.path.exists(req_path):
+            await msg.edit_text("🔄 Updating dependencies...")
+            await run_bash(f"pip install -r {req_path}")
+        await msg.edit_text("✅ Update complete. Restarting bot...\n\nGit:\n" + str(out)[:500])
+        os.execv(sys.executable, ['python'] + sys.argv)
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self._is_admin(update.effective_user.id): return
@@ -462,6 +527,9 @@ class AegisBot:
             else:
                 self.set_state(name, CloneState.STOPPED)
 
+            # Global 20s stagger delay between starts to avoid CPU spikes
+            await asyncio.sleep(20)
+
         await self.refresh_dashboard(force=True)
 
     async def _mass_start(self, chat_id):
@@ -502,13 +570,13 @@ class AegisBot:
     # ─────────────────────────────────────────────────────────────────────
     async def _auto_resume(self):
         """
-        Read persistence.target_states, enqueue all clones whose
-        expected state is RUNNING via the sequential startup queue.
+        Read config clones_data, enqueue all clones whose
+        expected state is RUNNING.
         """
         await asyncio.sleep(5)
         targets = [
-            n for n, ts in self.persistence.target_states.items()
-            if ts == "RUNNING"
+            c.get("name") for c in self.config.clones_data
+            if c.get("status") == "RUNNING" and c.get("name")
         ]
         if not targets:
             return
@@ -523,10 +591,7 @@ class AegisBot:
             except Exception:
                 pass
         for n in targets:
-            ci = self.config.get_clone(n)
-            if ci:
-                await self._enqueue_start(n, admin_id)
-                await asyncio.sleep(60)
+            await self._enqueue_start(n, admin_id)
 
     # ─────────────────────────────────────────────────────────────────────
     # Helpers
@@ -613,13 +678,24 @@ class AegisBot:
         self._maint_in_progress = False
 
     async def _maint_timer_loop(self):
-        """Checks every minute if maintenance is due."""
+        """Checks every minute if maintenance is due or RAM < 10%."""
         last_run = time.time()
+        from memory_manager import MemoryManager
         while True:
             await asyncio.sleep(60)
+            
+            free_ram = MemoryManager.get_free_ram_percentage()
+            if free_ram < 10.0 and not self._maint_in_progress:
+                logger.warning(f"CRITICAL RAM ({free_ram}%). Triggering Smart RAM Cleanup.")
+                MemoryManager.smart_ram_cleanup()
+                await self.run_maintenance_cycle()
+                last_run = time.time()
+                continue
+                
             if self.maintenance_enabled and not self._maint_in_progress:
                 elapsed = (time.time() - last_run) / 60
                 if elapsed >= self.maintenance_minutes:
+                    MemoryManager.smart_ram_cleanup()
                     await self.run_maintenance_cycle()
                     last_run = time.time()
 
@@ -648,6 +724,8 @@ class AegisBot:
         # 3. Handlers
         app.add_handler(CommandHandler("start",   self.cmd_start))
         app.add_handler(CommandHandler("console", self.cmd_console))
+        app.add_handler(CommandHandler("exec",    self.cmd_exec))
+        app.add_handler(CommandHandler("update",  self.cmd_update))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         app.add_handler(CallbackQueryHandler(self.handle_callback))
         app.add_error_handler(self.error_handler)

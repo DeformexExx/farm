@@ -72,3 +72,27 @@ class ConfigManager:
             if c.get("name") == clone_name:
                 return c
         return {}
+
+    def update_clone_status(self, clone_name: str, status: str):
+        """Обновляет статус клона и сохраняет в DEV_2.json (config_file)"""
+        updated = False
+        for c in self.clones_data:
+            if c.get("name") == clone_name:
+                c["status"] = status
+                updated = True
+                break
+        
+        if updated and os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                
+                if isinstance(data, dict) and "clones" in data:
+                    data["clones"] = self.clones_data
+                else:
+                    data = self.clones_data
+                    
+                with open(self.config_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=4)
+            except Exception as e:
+                logger.error(f"Failed to update clone status in config: {e}")

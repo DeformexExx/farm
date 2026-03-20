@@ -74,6 +74,27 @@ class MemoryManager:
         except Exception:
             pass
 
+    @staticmethod
+    def get_free_ram_percentage() -> float:
+        """Возвращает процент свободной ОЗУ."""
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            return 100.0 - mem.percent
+        except:
+            return 50.0
+
+    @staticmethod
+    def smart_ram_cleanup():
+        """Очистка кешей клонов и сброс системных кешей (v5.2)."""
+        cmds = [
+            "rm -rf /data/data/com.roblox.client*/cache/*",
+            "rm -rf /data/data/com.roblox.client*/code_cache/*",
+            "sync; echo 3 > /proc/sys/vm/drop_caches"
+        ]
+        for cmd in cmds:
+            subprocess.run(f"su -c '{cmd}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 if __name__ == "__main__":
     MemoryManager.setup_swap()
     MemoryManager.v4_pre_launch_optimize()

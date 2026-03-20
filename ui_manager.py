@@ -37,19 +37,31 @@ class UIManager:
             [KeyboardButton("⚙️ SYSTEM"), KeyboardButton("⚙️ Maintenance")],
         ], resize_keyboard=True)
 
-    # ── DEVICE DASHBOARD ──────────────────────────────────────────────────
+    @staticmethod
+    def _make_bar(percent_str: str, length: int = 10) -> str:
+        try:
+            val = float(percent_str.replace('%', ''))
+            filled = int(round((val / 100.0) * length))
+            filled = max(0, min(length, filled))
+            return '▰' * filled + '▱' * (length - filled)
+        except:
+            return '▱' * length
+
     @staticmethod
     def format_dashboard(device_id: str, ram: str, cpu: str, temp: str) -> str:
+        ram_bar = UIManager._make_bar(ram)
+        cpu_bar = UIManager._make_bar(cpu)
         return (
-            "💎 *AEGIS V4.0 — DEVICE*\n"
+            "💎 *AEGIS V5.2 — LIQUID GLASS*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 DEVICE  : `{device_id}`\n"
-            f"🐕 WATCHDOG: `[STATE-GATED 🔒]`\n"
+            f"🐕 WATCHDOG: `[DEEP MONITOR 🔒]`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"🧠 RAM: `{ram}` | 🚀 CPU: `{cpu}`\n"
+            f"🧠 RAM: `[{ram_bar}]` {ram}\n"
+            f"🚀 CPU: `[{cpu_bar}]` {cpu}\n"
             f"🌡 TEMP: `{temp}`\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "✨ _State Machine Active_"
+            "✨ _Advanced Telemetry Active_"
         )
 
     @staticmethod
@@ -82,14 +94,14 @@ class UIManager:
             [InlineKeyboardButton("🏠 BACK", callback_data="nav_home")],
         ])
 
-    # ── CLONE HUB TEXT — V4.0 State Machine Cards ─────────────────────────
+    # ── CLONE HUB TEXT — V5.2 Liquid Glass Card ─────────────────────────
     @staticmethod
     def format_clones_hub(clones_data: list, state_map: dict, uptime_map: dict) -> str:
         """
         state_map:  {clone_name: CloneState (str value)}
         uptime_map: {clone_name: start_timestamp (float) or None}
         """
-        msg = "💎 *AEGIS OVERLORD V4.0*\n"
+        msg = "💎 *AEGIS OVERLORD V5.2*\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
         if not clones_data:
@@ -116,13 +128,20 @@ class UIManager:
             else:
                 uptime = "—"
 
-            # Thread info (from status_map, optional)
+            # Thread info
             thr_info = state_map.get(f"{name}:threads", "")
             thr_line = f"🧵 Threads: `{thr_info}`" if thr_info else "🧵 Threads: `—`"
+            
+            # Status badge
+            status_text = state_map.get(f"{name}:status", "Stable")
+            if state == "STOPPED":
+                status_text = "Offline"
+            elif state == "STARTING":
+                status_text = "Injecting"
 
             msg += (
                 f"[🎮 *{name.upper()}*]\n"
-                f"State: {icon}\n"
+                f"State: {icon} | 📊 {status_text}\n"
                 f"{thr_line} | ⏱ Uptime: `{uptime}`\n"
                 "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n"
             )

@@ -35,7 +35,7 @@ class MonitorEngine:
     @staticmethod
     async def get_clone_status(clone_name: str) -> str:
         """
-        Проверяет запущен ли клон. Если да - возвращает статистику памяти и потоков.
+        Проверяет запущен ли клон. Если да - возвращает статистику памяти, потоков и CPU.
         Если нет - возвращает 'Offline'.
         """
         ret, stdout_pid, _ = await run_bash(f"su -c 'pidof com.roblox.{clone_name}'")
@@ -46,6 +46,14 @@ class MonitorEngine:
                 # Get RSS memory and Threads using ps/grep or /proc parsing via su
                 cmd_stats = f"su -c 'cat /proc/{pid}/status | grep -E \"(VmRSS|Threads)\"'"
                 ret_st, stdout_st, _ = await run_bash(cmd_stats)
+                
+                cmd_stat = f"su -c 'cat /proc/{pid}/stat'"
+                ret_stat, stdout_stat, _ = await run_bash(cmd_stat)
+                cpu_ticks = "0"
+                if ret_stat == 0 and stdout_stat:
+                    parts = stdout_stat.split()
+                    if len(parts) >= 15:
+                        cpu_ticks = str(int(parts[13]) + int(parts[14]))
                 
                 threads, mem = "?", "?"
                 if ret_st == 0:
@@ -60,7 +68,7 @@ class MonitorEngine:
                             if len(parts) >= 2:
                                 threads = parts[1]
                                 
-                return f"Mem: {mem} | Thr: {threads}"
+                return f"Mem: {mem} | Thr: {threads} | CpuTicks: {cpu_ticks}"
             except Exception as e:
                 logger.error(f"Error fetching stats for {clone_name}: {e}")
                 return "Stats Error"
