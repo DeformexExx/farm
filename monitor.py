@@ -35,19 +35,20 @@ class MonitorEngine:
     @staticmethod
     async def get_clone_status(clone_name: str) -> str:
         """
-        Проверяет запущен ли клон. Если да - возвращает статистику памяти, потоков и CPU.
-        Если нет - возвращает 'Offline'.
+        V5.6 Native Sight: Checks for clone using 'su -c ps -ef'.
         """
-        ret, stdout_pid, _ = await run_bash(f"su -c 'pidof com.roblox.{clone_name}'")
+        # Improved PID search for ugPhone (V5.6)
+        cmd_pid = f"su -c \"ps -ef | grep com.roblox.{clone_name} | grep -v grep | awk '{{print $2}}'\""
+        ret, stdout_pid, _ = await run_bash(cmd_pid)
         pid = stdout_pid.strip()
         
-        if ret == 0 and pid:
+        if pid:
             try:
-                # Get RSS memory and Threads using ps/grep or /proc parsing via su
-                cmd_stats = f"su -c 'cat /proc/{pid}/status | grep -E \"(VmRSS|Threads)\"'"
+                # Use root access for threads and memory (V5.6)
+                cmd_stats = f"su -c \"cat /proc/{pid}/status | grep -E '(VmRSS|Threads)'\""
                 ret_st, stdout_st, _ = await run_bash(cmd_stats)
                 
-                cmd_stat = f"su -c 'cat /proc/{pid}/stat'"
+                cmd_stat = f"su -c \"cat /proc/{pid}/stat\""
                 ret_stat, stdout_stat, _ = await run_bash(cmd_stat)
                 cpu_ticks = "0"
                 if ret_stat == 0 and stdout_stat:

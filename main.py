@@ -137,8 +137,8 @@ async def watchdog_loop(application: Application, bot_instance: "AegisBot"):
                     else:
                         cpu_zeros[name] = 0
                         
-                    if thr < 100:
-                        reason       = f"Frozen (Thr:{thr}<100)"
+                    if thr < 80:
+                        reason       = f"Frozen (Thr:{thr}<80)"
                         needs_action = True
                     elif cpu_zeros.get(name, 0) >= 2:
                         reason       = f"Lagging (CPU 0% for 120s)"
@@ -489,6 +489,19 @@ class AegisBot:
             # ── 1. Force Identity & Inject ──────────────────────────────
             self.set_state(name, CloneState.STARTING)
             
+            # V5.6 "NATIVE SIGHT": Check if already running
+            status_str = await MonitorEngine.get_clone_status(name)
+            if "Offline" not in status_str:
+                logger.info(f"Catch Running: {name} already has a PID. Skipping injection.")
+                self.set_state(name, CloneState.RUNNING)
+                app = self.application
+                if chat_id and app:
+                    try:
+                        await app.bot.send_message(
+                            chat_id, f"👁 `{name}`: Process detected. Attaching...", parse_mode="Markdown")
+                    except Exception: pass
+                return
+
             sm = None
             app = self.application
             if chat_id and app:
@@ -581,9 +594,14 @@ class AegisBot:
     # ─────────────────────────────────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────────────────────────────────
-    # ── CONSOLE BATCHER (V5.3 Turbo) ─────────────────────────────────────
+    # ── CONSOLE BATCHER (V5.6 Turbo) ─────────────────────────────────────
     async def add_log_line(self, line: str):
         await self.console_queue.put(line)
+        # V5.6 Priority: If ERROR is in line, trigger immediate flush
+        if "ERROR" in line.upper():
+            admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
+            if admin_id:
+                asyncio.create_task(self.flush_console_buffer(admin_id))
 
     async def flush_console_buffer(self, chat_id: int):
         if self.console_queue.empty(): return
@@ -598,9 +616,11 @@ class AegisBot:
         
         self.last_console_flush = time.time()
 
-        if self.application:
+        # V5.6 Priority: If ERROR is in batch, send immediately (already here, but reinforcement)
+        app = self.application
+        if app:
             try:
-                await self.application.bot.send_message(chat_id, f"<code>{batch_str}</code>", parse_mode="HTML")
+                await app.bot.send_message(chat_id, f"<code>{batch_str}</code>", parse_mode="HTML")
             except TelegramError as e:
                 # 429 Retry logic remains same
                 if "retry after" in str(e).lower():
@@ -609,23 +629,25 @@ class AegisBot:
                     if match: wait = int(match.group(1))
                     await asyncio.sleep(wait)
                     try:
-                        await self.application.bot.send_message(chat_id, f"<code>{batch_str}</code>", parse_mode="HTML")
+                        await app.bot.send_message(chat_id, f"<code>{batch_str}</code>", parse_mode="HTML")
                     except Exception as e2:
                         logger.error(f"Console Retry failed: {e2}")
                 else:
                     logger.error(f"Console send error: {e}")
 
     async def _console_auto_flush_loop(self, chat_id: int):
-        """Adaptive flush: 500 chars or 1.5s."""
+        """Adaptive flush: 500 chars or 1.5s or ERROR priority."""
         while self._console_on:
-            await asyncio.sleep(0.5) # Fast polling
+            await asyncio.sleep(0.5) 
             
             qsize = self.console_queue.qsize()
             elapsed = time.time() - self.last_console_flush
             
-            # Approximate size check (assuming ~80 chars per line)
-            # or we can pull one item to check, but let's keep it simple
+            # Priority check for ERROR (V5.6)
+            # This is hard to do without popping, so let's just 
+            # assume if there's anything, we check if we should flush.
             if qsize > 0:
+                # If we have many lines or 1.5s passed, flush
                 if qsize >= 10 or elapsed >= 1.5:
                     await self.flush_console_buffer(chat_id)
 
@@ -662,16 +684,24 @@ class AegisBot:
             await message.reply_text(f"❌ Screenshot Exception: {e}")
 
     async def _git_sync(self, chat_id: int):
+        await self.add_log_line("📦 Git Sync (V5.6 Native Stable)...")
         try:
-            if self.application:
-                await self.application.bot.send_message(chat_id, "♻️ Git Sync…")
-            ret, out, err = await run_bash(f"git -C {_bot_dir} pull --rebase 2>&1")
+            # V5.6 Reset sequence
+            await run_bash('su -c "chmod -R 777 ."')
+            await run_bash("git fetch --all")
+            ret, out, err = await run_bash("git reset --hard origin/main")
+            
             result = (out or err or "(no output)")[:3000]
-            if self.application:
+            if chat_id and self.application:
                 await self.application.bot.send_message(
-                    chat_id, f"```\n{result}\n```\n✅ VERSION: {VERSION}", parse_mode="Markdown")
+                    chat_id, f"✅ *Sync & Reset Complete*\n```\n{result}\n```\nRebooting...", parse_mode="Markdown")
+            
+            await asyncio.sleep(2)
+            os.execv(sys.executable, ['python'] + sys.argv)
         except Exception as e:
             logger.error(f"git_sync error: {e}")
+            if chat_id and self.application:
+                await self.application.bot.send_message(chat_id, f"❌ Sync failed: {e}")
 
     # ── MAINTENANCE CYCLE ────────────────────────────────────────────────
     async def run_maintenance_cycle(self, chat_id: Optional[int] = None):
@@ -782,7 +812,16 @@ class AegisBot:
 
         logger.info(f"💎 PROJECT AEGIS V{VERSION} ONLINE — {DEVICE_ID}")
 
-        # 7. Poll
+        # 7. Auto-Boot (V5.6)
+        admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
+        for clone in self.config.clones_data:
+            c_name = clone.get("name")
+            c_status = clone.get("status", "STOPPED").upper()
+            if c_status in ("RUNNING", "IDLE") and c_name:
+                logger.info(f"Auto-Boot: Enqueueing {c_name}...")
+                asyncio.create_task(self._enqueue_start(c_name, admin_id))
+
+        # 8. Poll
         await app.updater.start_polling(drop_pending_updates=True)
 
         # 8. Block

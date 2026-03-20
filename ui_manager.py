@@ -119,7 +119,8 @@ class UIManager:
 
         for clone in clones_data:
             name  = clone.get("name", "Unknown")
-            state = state_map.get(name, "STOPPED")
+            raw_s = state_map.get(name, "STOPPED")
+            state = str(raw_s.value if hasattr(raw_s, 'value') else raw_s).upper()
             icon  = STATE_ICONS.get(state, "❓ UNKNOWN")
 
             # Uptime
@@ -176,8 +177,8 @@ class UIManager:
     @staticmethod
     def get_clone_submenu(name: str, state: Any) -> InlineKeyboardMarkup:
         """Individual clone control keyboard."""
-        # Fix Enum vs str bug (V5.3 Hotfix)
-        state_str = str(state.value if hasattr(state, 'value') else state)
+        # Fix Enum vs str bug (V5.6 Native Sight)
+        state_str = str(state.value if hasattr(state, 'value') else state).upper()
         
         rows = []
         if state_str in ("STOPPED", "COOLDOWN"):
