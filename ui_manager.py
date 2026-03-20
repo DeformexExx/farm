@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # ui_manager.py — Project Aegis V4.0 Dark Premium
 import re
+from typing import Any
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 
 
@@ -173,12 +174,15 @@ class UIManager:
 
     # ── CLONE SUB-MENU ────────────────────────────────────────────────────
     @staticmethod
-    def get_clone_submenu(name: str, state: str) -> InlineKeyboardMarkup:
+    def get_clone_submenu(name: str, state: Any) -> InlineKeyboardMarkup:
         """Individual clone control keyboard."""
+        # Fix Enum vs str bug (V5.3 Hotfix)
+        state_str = str(state.value if hasattr(state, 'value') else state)
+        
         rows = []
-        if state in ("STOPPED", "COOLDOWN"):
+        if state_str in ("STOPPED", "COOLDOWN"):
             rows.append([InlineKeyboardButton("⚡️ Start",    callback_data=f"start_{name}")])
-        elif state == "RUNNING":
+        elif state_str == "RUNNING":
             rows.append([InlineKeyboardButton("❄️ Stop",     callback_data=f"stop_{name}")])
             rows.append([InlineKeyboardButton("♻️ Relaunch", callback_data=f"start_{name}")])
         else:

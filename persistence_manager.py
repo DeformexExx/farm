@@ -87,3 +87,12 @@ class PersistenceManager:
 
     def get_target_state(self, name: str) -> str:
         return self.target_states.get(name, "STOPPED")
+
+    def force_sync_status(self, states_dict: dict):
+        """V5.3 Hotfix: Convert any Enum objects in the state dict to strings before saving."""
+        clean_states = {}
+        for k, v in states_dict.items():
+            # If it's an Enum, take .value, otherwise str
+            clean_states[k] = str(v.value if hasattr(v, 'value') else v)
+        self.target_states.update(clean_states)
+        self.save()

@@ -192,8 +192,8 @@ class AegisBot:
         self._console_on: bool = self.persistence.console_mode
         self._last_ui_update: float = 0.0
 
-        # ── CONSOLE BUFFER (V5.3) ──────────────────────────────────────────
-        self.console_buffer: list[str] = []
+        # ── CONSOLE BUFFER (V5.3 Turbo) ─────────────────────────────────────
+        self.console_queue = asyncio.Queue()
         self.last_console_flush: float = 0.0
         self.console_lock = asyncio.Lock()
         self._console_task: Optional[asyncio.Task] = None
@@ -390,13 +390,17 @@ class AegisBot:
             elif d == "toggle_restore":
                 self.persistence.auto_restore = not self.persistence.auto_restore
                 self.persistence.save()
-                await q.edit_message_reply_markup(
-                    UIManager.get_system_keyboard(self._console_on, self.persistence.auto_restore))
+                try:
+                    await q.edit_message_reply_markup(
+                        UIManager.get_system_keyboard(self._console_on, self.persistence.auto_restore))
+                except Exception: pass
 
             elif d == "toggle_console":
                 await self._toggle_console(context, chat)
-                await q.edit_message_reply_markup(
-                    UIManager.get_system_keyboard(self._console_on, self.persistence.auto_restore))
+                try:
+                    await q.edit_message_reply_markup(
+                        UIManager.get_system_keyboard(self._console_on, self.persistence.auto_restore))
+                except Exception: pass
 
             elif d == "sys_sync":  await self._git_sync(chat)
             elif d == "sys_screenshot": await self._take_screenshot(q.message)
@@ -427,18 +431,23 @@ class AegisBot:
 
             elif d.startswith("clone_"):
                 name  = d[6:]
-                state = self.clone_states.get(name, CloneState.STOPPED).value
-                kb    = UIManager.get_clone_submenu(name, state)
+                # V5.3 Hotfix: Robust state extraction
+                raw_state = self.clone_states.get(name, CloneState.STOPPED)
+                state_val = str(raw_state.value if hasattr(raw_state, 'value') else raw_state)
+                
+                kb    = UIManager.get_clone_submenu(name, state_val)
                 await context.bot.send_message(
                     chat,
-                    f"⚙️ *{name.upper()}*\nState: `{state}`",
+                    f"⚙️ *{name.upper()}*\nState: `{state_val}`",
                     reply_markup=kb, parse_mode="Markdown"
                 )
 
             elif d == "maint_toggle":
                 self.maintenance_enabled = not self.maintenance_enabled
-                await q.edit_message_reply_markup(
-                    UIManager.get_maintenance_keyboard(self.maintenance_enabled, self.maintenance_minutes))
+                try:
+                    await q.edit_message_reply_markup(
+                        UIManager.get_maintenance_keyboard(self.maintenance_enabled, self.maintenance_minutes))
+                except Exception: pass
 
             elif d == "maint_set_timer":
                 self._waiting_for_timer = True
@@ -572,52 +581,53 @@ class AegisBot:
     # ─────────────────────────────────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────────────────────────────────
-    # ── CONSOLE BATCHER (V5.3) ───────────────────────────────────────────
+    # ── CONSOLE BATCHER (V5.3 Turbo) ─────────────────────────────────────
     async def add_log_line(self, line: str):
-        async with self.console_lock:
-            self.console_buffer.append(line)
-            # Threshold check: 15 lines OR 3.5s elapsed
-            if len(self.console_buffer) >= 15 or (time.time() - self.last_console_flush > 3.5):
-                admin_id = self.config.admin_ids[0] if self.config.admin_ids else None
-                if admin_id:
-                    asyncio.create_task(self.flush_console_buffer(admin_id))
+        await self.console_queue.put(line)
 
     async def flush_console_buffer(self, chat_id: int):
-        async with self.console_lock:
-            if not self.console_buffer: return
-            raw_batch = "\n".join(self.console_buffer)
-            batch_str = str(raw_batch)
-            if len(batch_str) > 4000: 
-                batch_str = batch_str[:3900] + "\n[TRUNCATED...]"
-            self.console_buffer.clear()
-            self.last_console_flush = time.time()
+        if self.console_queue.empty(): return
+        
+        lines = []
+        while not self.console_queue.empty():
+            lines.append(await self.console_queue.get())
+        
+        batch_str = "[BATCH]\n" + "\n".join(lines)
+        if len(batch_str) > 4000: 
+            batch_str = batch_str[:3900] + "\n[TRUNCATED...]"
+        
+        self.last_console_flush = time.time()
 
-        app = self.application
-        if app:
+        if self.application:
             try:
-                await app.bot.send_message(chat_id, f"<code>{batch_str}</code>", parse_mode="HTML")
+                await self.application.bot.send_message(chat_id, f"<code>{batch_str}</code>", parse_mode="HTML")
             except TelegramError as e:
+                # 429 Retry logic remains same
                 if "retry after" in str(e).lower():
                     wait = 5
                     match = re.search(r'after (\d+)', str(e))
                     if match: wait = int(match.group(1))
-                    logger.warning(f"Flood control: waiting {wait}s...")
                     await asyncio.sleep(wait)
                     try:
-                        await app.bot.send_message(chat_id, f"<code>{batch_str}</code>", parse_mode="HTML")
+                        await self.application.bot.send_message(chat_id, f"<code>{batch_str}</code>", parse_mode="HTML")
                     except Exception as e2:
-                        logger.error(f"Retry failed: {e2}")
-                        with open(BOOT_LOG, "a") as f:
-                            f.write(f"\n[429 LOST] {str(batch_str)[:100]}...\n")
+                        logger.error(f"Console Retry failed: {e2}")
                 else:
                     logger.error(f"Console send error: {e}")
 
     async def _console_auto_flush_loop(self, chat_id: int):
-        """Emergency flush every 4s if buffer is not empty."""
+        """Adaptive flush: 500 chars or 1.5s."""
         while self._console_on:
-            await asyncio.sleep(4)
-            if self.console_buffer:
-                await self.flush_console_buffer(chat_id)
+            await asyncio.sleep(0.5) # Fast polling
+            
+            qsize = self.console_queue.qsize()
+            elapsed = time.time() - self.last_console_flush
+            
+            # Approximate size check (assuming ~80 chars per line)
+            # or we can pull one item to check, but let's keep it simple
+            if qsize > 0:
+                if qsize >= 10 or elapsed >= 1.5:
+                    await self.flush_console_buffer(chat_id)
 
     async def _toggle_console(self, context, chat_id: int):
         self._console_on = not self._console_on
